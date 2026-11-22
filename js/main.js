@@ -1487,6 +1487,7 @@ function songNameOf(d) {
   return d.audio.name || 'Песня дня';
 }
 function buildItems(d) {
+  stopDayMedia();
   $('world').innerHTML = '';
   player = null;
   const items = [],
@@ -1520,7 +1521,11 @@ function buildItems(d) {
   for (let i = 0; i < Math.max(photos.length, frags.length); i++) {
     if (photos[i]) seq.push(['ph', photos[i], i]);
     if (frags[i]) seq.push(['tx', frags[i], i]);
+    if (i === 0 && d.video && d.video.blob) seq.push(['tv', d.video, 0]);
+    if (i === 1 && d.tape && d.tape.blob) seq.push(['tape', d.tape, 0]);
   }
+  // a day with one photo or note still gets its cassette, a step further than the TV
+  if (d.tape && d.tape.blob && !seq.some(x => x[0] === 'tape')) seq.push(['tape', d.tape, 0]);
   const z0 = 0.36,
     z1 = 0.86,
     total = seq.length;
@@ -1556,6 +1561,11 @@ function buildItems(d) {
       order: pinN++,
     };
     let e;
+    if (k === 'tv' || k === 'tape') {
+      e = k === 'tv' ? tvItem(v, d) : tapeItem(v, d);
+      items.push({ el: e, z, x, y, ry: -side * 16, rx: 4, rz: side * 2, ph: ph(), pin: true, interactive: true, ...slot });
+      return;
+    }
     if (k === 'ph') {
       e = el(
         'frame',
@@ -2062,6 +2072,211 @@ function stopSong() {
   };
   step();
 }
+/* DayMedia in the day. While the TV's sound or the cassette plays, the day's own music drops by about
+   two thirds (the ambient sky and the song alike), and comes back when they stop. */
+let dayMedia = [];
+const MEDIA_DUCK = 0.33;
+function mediaDuck() {
+  const on = dayMedia.some(m => m.loud());
+  if (songEl) {
+    if (songEl.base0 == null) songEl.base0 = songEl.baseVol;
+    songEl.baseVol = songEl.base0 * (on ? MEDIA_DUCK : 1);
+  }
+  snd.setDuck((songEl ? 0.2 : 1) * (on ? MEDIA_DUCK : 1));
+}
+function stopDayMedia() {
+  dayMedia.forEach(m => m.stop());
+  dayMedia = [];
+}
+/* Knob: a round control turned by dragging up/down (or sideways), the wheel or the arrow keys.
+   Its mark points from -135° (0) to +135° (1). get() reads the value, set(v) applies it. */
+function knob(b, get, set, label) {
+  b.setAttribute('role', 'slider');
+  b.setAttribute('aria-label', label);
+  b.setAttribute('aria-valuemin', '0');
+  b.setAttribute('aria-valuemax', '100');
+  const show = () => {
+    const v = Math.max(0, Math.min(1, get() || 0));
+    b.style.setProperty('--a', -135 + 270 * v + 'deg');
+    b.setAttribute('aria-valuenow', String(Math.round(v * 100)));
+  };
+  const put = v => {
+    set(Math.max(0, Math.min(1, v)));
+    show();
+  };
+  let drag = null;
+  b.addEventListener('pointerdown', ev => {
+    ev.stopPropagation();
+    ev.preventDefault();
+    b.setPointerCapture(ev.pointerId);
+    drag = { x: ev.clientX, y: ev.clientY, v: get() || 0 };
+    b.classList.add('turn');
+  });
+  b.addEventListener('pointermove', ev => {
+    if (!drag) return;
+    ev.stopPropagation();
+    put(drag.v + (ev.clientX - drag.x - (ev.clientY - drag.y)) / 160);
+  });
+  const end = ev => {
+    if (!drag) return;
+    ev.stopPropagation();
+    drag = null;
+    b.classList.remove('turn');
+  };
+  b.addEventListener('pointerup', end);
+  b.addEventListener('pointercancel', end);
+  b.addEventListener(
+    'wheel',
+    ev => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      put((get() || 0) - Math.sign(ev.deltaY) * 0.05);
+    },
+    { passive: false },
+  );
+  b.addEventListener('keydown', ev => {
+    const k = { ArrowUp: 0.05, ArrowRight: 0.05, ArrowDown: -0.05, ArrowLeft: -0.05 }[ev.key];
+    if (k == null) return;
+    ev.stopPropagation();
+    ev.preventDefault();
+    put((get() || 0) + k);
+  });
+  b.onclick = ev => ev.stopPropagation();
+  show();
+  return show;
+}
+const ICON_PP = '<svg class="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg><svg class="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>';
+/* RetroTV: the video plays on a loop, silent at first. Tapping the screen pauses or resumes it; the
+   upper knob scrubs through the video, the lower knob is its volume (turned to zero it is silent). */
+function tvItem(v, d) {
+  const e = el(
+    'tv',
+    `<div class="tv-body"><div class="tv-scr"><video muted loop playsinline preload="metadata"></video><i class="tv-scan"></i><button type="button" class="tv-pp" aria-label="Пауза">${ICON_PP}</button></div><div class="tv-side"><button type="button" class="knob k-time"></button><small>время</small><button type="button" class="knob k-vol"></button><small>звук</small><i class="grill"></i></div><i class="tv-leg l"></i><i class="tv-leg r"></i></div>`,
+  );
+  const vd = e.querySelector('video'),
+    pp = e.querySelector('.tv-pp'),
+    url = URL.createObjectURL(v.blob);
+  vd.src = url;
+  vd.volume = 0;
+  vd.setAttribute('aria-label', 'Видео дня, ' + shortDate(d.date));
+  const state = () => {
+    e.classList.toggle('paused', vd.paused);
+    e.classList.toggle('loud', !vd.muted && !vd.paused);
+    pp.setAttribute('aria-label', vd.paused ? 'Продолжить видео' : 'Пауза');
+    mediaDuck();
+  };
+  const toggle = ev => {
+    ev.stopPropagation();
+    if (vd.paused) vd.play().catch(() => {});
+    else vd.pause();
+  };
+  pp.onclick = toggle;
+  e.querySelector('.tv-scr').onclick = toggle;
+  vd.addEventListener('play', state);
+  vd.addEventListener('pause', state);
+  const showTime = knob(
+    e.querySelector('.k-time'),
+    () => (vd.duration ? vd.currentTime / vd.duration : 0),
+    k => vd.duration && (vd.currentTime = k * vd.duration * 0.999),
+    'Время видео',
+  );
+  knob(
+    e.querySelector('.k-vol'),
+    () => (vd.muted ? 0 : vd.volume),
+    k => {
+      vd.volume = k;
+      vd.muted = k < 0.02 || !settings.sound;
+      state();
+    },
+    'Громкость видео',
+  );
+  vd.addEventListener('timeupdate', showTime);
+  vd.play().catch(() => {});
+  dayMedia.push({
+    loud: () => !vd.muted && !vd.paused && vd.volume > 0,
+    stop: () => {
+      vd.pause();
+      vd.removeAttribute('src');
+      vd.load();
+      URL.revokeObjectURL(url);
+    },
+  });
+  return e;
+}
+/* CassettePlayer: a pocket tape player in 3D. The cassette floats above it; ▶ drops it into the window
+   and plays it on a loop, ‖ pauses, ⏏ takes it out. The player tilts toward the pointer. */
+function tapeItem(v, d) {
+  const name = (v.name || 'Звук дня').replace(/\.[a-z0-9]+$/i, '').slice(0, 28);
+  const e = el(
+    'deck',
+    `<div class="wm"><div class="wm-body"><div class="wm-top"><span class="wm-brand">звук дня</span><span class="wm-led"></span></div><div class="wm-win"><div class="cassette"><div class="c-label"></div><div class="c-win"><i class="reel"></i><i class="c-tape"></i><i class="reel"></i></div></div><i class="wm-glass"></i></div><div class="wm-keys"><button type="button" data-k="play" aria-label="Играть"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></button><button type="button" data-k="pause" aria-label="Пауза"><svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg></button><button type="button" data-k="eject" aria-label="Достать кассету"><svg viewBox="0 0 24 24"><path d="M5 14l7-8 7 8zM5 18.5h14"/></svg></button></div><div class="wm-foot"><span class="wm-count">000</span><span class="wm-name"></span></div></div><i class="wm-side"></i></div>`,
+  );
+  e.querySelector('.c-label').textContent = name;
+  e.querySelector('.wm-name').textContent = name;
+  const tc = toned(d);
+  e.style.setProperty('--c1', tc[0]);
+  e.style.setProperty('--c2', tc[1] || tc[0]);
+  const url = URL.createObjectURL(v.blob),
+    a = new Audio(url),
+    cnt = e.querySelector('.wm-count');
+  a.loop = true;
+  let wait = 0;
+  const state = () => {
+    e.classList.toggle('play', !a.paused);
+    mediaDuck();
+  };
+  a.addEventListener('play', state);
+  a.addEventListener('pause', state);
+  a.addEventListener('timeupdate', () => (cnt.textContent = String(Math.floor(a.currentTime) % 1000).padStart(3, '0')));
+  const play = () => {
+    a.volume = Math.max(0.3, settings.volume);
+    a.muted = !settings.sound;
+    a.play().catch(() => {});
+  };
+  e.querySelectorAll('.wm-keys button').forEach(b => {
+    b.onclick = ev => {
+      ev.stopPropagation();
+      b.classList.add('down');
+      setTimeout(() => b.classList.remove('down'), 180);
+      clearTimeout(wait);
+      const k = b.dataset.k;
+      if (k === 'play') {
+        if (e.classList.contains('in')) play();
+        else {
+          // the cassette drops into the window first, then the tape starts
+          e.classList.add('in');
+          wait = setTimeout(play, 700);
+        }
+      } else if (k === 'pause') a.pause();
+      else {
+        a.pause();
+        e.classList.remove('in');
+      }
+    };
+  });
+  // a gentle tilt toward the pointer gives the player its depth
+  const wm = e.querySelector('.wm');
+  e.addEventListener('pointermove', ev => {
+    const r = wm.getBoundingClientRect(),
+      x = (ev.clientX - r.left) / r.width - 0.5,
+      y = (ev.clientY - r.top) / r.height - 0.5;
+    wm.style.setProperty('--ry', (x * 18).toFixed(1) + 'deg');
+    wm.style.setProperty('--rx', (12 - y * 14).toFixed(1) + 'deg');
+  });
+  e.addEventListener('pointerleave', () => {
+    wm.style.removeProperty('--ry');
+    wm.style.removeProperty('--rx');
+  });
+  dayMedia.push({
+    loud: () => !a.paused,
+    stop: () => {
+      clearTimeout(wait);
+      a.pause();
+      URL.revokeObjectURL(url);
+    },
+  });
+  return e;
+}
 function openDayView(d) {
   // entry ritual: the sphere falls as a drop and blooms into the day's paint while the camera dives
   // the sphere itself falls as the drop; the camera dives in when it touches the water
@@ -2171,6 +2386,7 @@ function playEmbed(d) {
 }
 function backToArchive() {
   if (!openDay) return;
+  stopDayMedia();
   stopSong();
   paused = false;
   snd.setDuck(1);
@@ -3067,6 +3283,24 @@ $('f-audio').onchange = () => {
   $('f-err').textContent = '';
   setupCut(f || null);
 };
+/* DayMedia: one video (a small retro TV in the day) and one sound (a cassette that slides into a player). */
+const MAX_VIDEO = 80 * 1024 * 1024,
+  MAX_TAPE = 30 * 1024 * 1024;
+const mediaPick = (id, txt, empty, re, max, err) => {
+  $(id).onchange = () => {
+    const f = $(id).files[0];
+    if (f && (!re.test(f.type) || f.size > max)) {
+      $(id).value = '';
+      $(txt).textContent = empty;
+      $('f-err').textContent = err;
+      return;
+    }
+    $(txt).textContent = f ? f.name : empty;
+    $('f-err').textContent = '';
+  };
+};
+mediaPick('f-video', 'f-videotxt', 'Видео', /^video\//, MAX_VIDEO, 'Нужно видео до 80 МБ.');
+mediaPick('f-tape', 'f-tapetxt', 'Звук', /^audio\//, MAX_TAPE, 'Нужен звук до 30 МБ.');
 /* Song segment ("тайминг"): which part of the song plays in the day, on a loop. */
 const CUT_MIN_SEC = 10; // the shortest part; the longest is the whole song
 let cut = { el: null, url: '', dur: 0, own: false, preview: false, touched: false, fx: 'underwater', vol: 1 };
@@ -3273,6 +3507,8 @@ function resetForm() {
   $('notes').innerHTML = '';
   addNote();
   $('f-audiotxt').textContent = 'Выбрать аудиофайл';
+  $('f-videotxt').textContent = 'Видео';
+  $('f-tapetxt').textContent = 'Звук';
   setDate(isoLocal(new Date()));
   toggleCal(false);
   $('f-err').textContent = '';
@@ -3479,6 +3715,8 @@ $('form').onsubmit = async e => {
       weather: ai ? ai.weather : null,
       voiceStyle: (ai && ai.voice) || '',
       ai: !!ai,
+      video: $('f-video').files[0] ? { blob: $('f-video').files[0], name: $('f-video').files[0].name } : null,
+      tape: $('f-tape').files[0] ? { blob: $('f-tape').files[0], name: $('f-tape').files[0].name } : null,
       ...coverForDay(photos, mood.colors),
     };
     if (d.audio && d.audio.url && cover.link && cover.link.title && !d.audio.name) d.audio.name = cover.link.title;
