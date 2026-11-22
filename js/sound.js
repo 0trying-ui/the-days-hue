@@ -223,9 +223,11 @@ export class Ambient {
     v.dead = true;
     clearTimeout(v.timer);
     const t = this.ctx.currentTime;
-    v.out.gain.cancelScheduledValues(t);
-    v.out.gain.setValueAtTime(v.out.gain.value, t);
-    v.out.gain.linearRampToValueAtTime(0, t + MUSIC_FADE_SEC);
+    for (const g of [v.out, v.fxOut]) {
+      g.gain.cancelScheduledValues(t);
+      g.gain.setValueAtTime(g.gain.value, t);
+      g.gain.linearRampToValueAtTime(0, t + MUSIC_FADE_SEC);
+    }
     setTimeout(() => {
       v.nodes.forEach(n => {
         try {
@@ -233,37 +235,68 @@ export class Ambient {
         } catch {}
       });
       v.out.disconnect();
-    }, 4000);
+      v.fxOut.disconnect();
+    }, (MUSIC_FADE_SEC + 1) * 1000);
   }
   _start(p) {
     const ctx = this.ctx,
       v = { dead: false, nodes: [], timer: 0 };
+    /* A voice: every sound of it (pads, bass, notes, noise, shimmer) goes into v.bus, its echo into v.fx.
+       Both pass the same way out: under water (in a day) through two low-pass filters whose cut-off sways,
+       then through a fade that rises from silence over MUSIC_FADE_SEC and dies away the same way. */
+    const now = ctx.currentTime,
+      level = p.underwater ? UNDERWATER_LEVEL : 1;
+    v.bus = ctx.createGain();
+    v.fx = ctx.createGain();
     v.out = ctx.createGain();
-    v.out.gain.setValueAtTime(0, ctx.currentTime);
-    v.out.gain.linearRampToValueAtTime(p.underwater ? UNDERWATER_LEVEL : 1, ctx.currentTime + MUSIC_FADE_SEC);
+    v.fxOut = ctx.createGain();
+    for (const [g, to] of [
+      [v.out, level],
+      [v.fxOut, 1],
+    ]) {
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(to, now + MUSIC_FADE_SEC);
+    }
+    const water = (from, to) => {
+      if (!p.underwater) return from.connect(to);
+      const f1 = ctx.createBiquadFilter(),
+        f2 = ctx.createBiquadFilter();
+      for (const f of [f1, f2]) {
+        f.type = 'lowpass';
+        f.frequency.value = UNDERWATER_HZ;
+        f.Q.value = 0.6;
+        sway.connect(f.frequency);
+      }
+      from.connect(f1);
+      f1.connect(f2);
+      f2.connect(to);
+    };
+    let sway = null;
+    if (p.underwater) {
+      const so = ctx.createOscillator();
+      sway = ctx.createGain();
+      so.frequency.value = 0.13;
+      sway.gain.value = UNDERWATER_SWAY_HZ;
+      so.connect(sway);
+      so.start();
+      v.nodes.push(so);
+    }
+    water(v.bus, v.out);
+    water(v.fx, v.fxOut);
+    v.out.connect(this.master);
+    v.fxOut.connect(this.delay);
+    // the mood's own soft filter on the pads, breathing slowly
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = p.underwater ? Math.min(p.cutoff, UNDERWATER_HZ) : p.cutoff;
+    lp.frequency.value = p.cutoff;
     lp.Q.value = 0.6;
-    if (p.underwater) {
-      // inside a day the music is heard from under water, like the day's own song: a second low-pass
-      // makes the cut steep (24 dB/oct), and the cut-off sways slowly (the LFO below)
-      const lp2 = ctx.createBiquadFilter();
-      lp2.type = 'lowpass';
-      lp2.frequency.value = lp.frequency.value;
-      lp2.Q.value = 0.6;
-      lp.connect(lp2);
-      lp2.connect(v.out);
-      v.lp2 = lp2;
-    } else lp.connect(v.out);
-    v.out.connect(this.master);
+    lp.connect(v.bus);
     const lfo = ctx.createOscillator(),
       lg = ctx.createGain();
     lfo.frequency.value = 0.07;
-    lg.gain.value = p.underwater ? UNDERWATER_SWAY_HZ : p.cutoff * 0.25;
+    lg.gain.value = p.cutoff * 0.25;
     lfo.connect(lg);
     lg.connect(lp.frequency);
-    if (v.lp2) lg.connect(v.lp2.frequency);
     lfo.start();
     v.nodes.push(lfo);
     const beat = 60 / p.bpm,
@@ -299,7 +332,7 @@ export class Ambient {
       bg.gain.linearRampToValueAtTime(0.2, t + 1);
       bg.gain.linearRampToValueAtTime(0, t + chordLen * 1.2);
       bo.connect(bg);
-      bg.connect(v.out);
+      bg.connect(v.bus);
       bo.start(t);
       bo.stop(t + chordLen * 1.3);
       for (let i = 0; i < 8; i++)
@@ -374,7 +407,7 @@ export class Ambient {
     g.gain.value = p.noiseGain || 0.06;
     src.connect(f);
     f.connect(g);
-    g.connect(v.out);
+    g.connect(v.bus);
     src.start();
     v.nodes.push(src);
     if (p.noise === 'waves') {
@@ -412,8 +445,8 @@ export class Ambient {
       l.connect(lg);
       lg.connect(g.gain);
       o.connect(g);
-      g.connect(v.out);
-      g.connect(this.delay);
+      g.connect(v.bus);
+      g.connect(v.fx);
       o.start();
       l.start();
       v.nodes.push(o, l);
@@ -427,8 +460,8 @@ export class Ambient {
     g.gain.setValueAtTime(0, at);
     g.gain.linearRampToValueAtTime(vol, at + 0.008);
     g.gain.exponentialRampToValueAtTime(0.0006, at + dec);
-    g.connect(v.out);
-    g.connect(this.delay);
+    g.connect(v.bus);
+    g.connect(v.fx);
     const parts =
       kind === 'bell'
         ? [
@@ -469,7 +502,7 @@ export class Ambient {
     g.gain.setValueAtTime(0.22, at);
     g.gain.exponentialRampToValueAtTime(0.001, at + 0.32);
     o.connect(g);
-    g.connect(v.out);
+    g.connect(v.bus);
     o.start(at);
     o.stop(at + 0.35);
   }
@@ -485,7 +518,7 @@ export class Ambient {
     g.gain.exponentialRampToValueAtTime(0.0005, at + 0.06);
     s.connect(f);
     f.connect(g);
-    g.connect(v.out);
+    g.connect(v.bus);
     s.start(at, Math.random() * 3, 0.08);
   }
   _drop(at, v) {
@@ -499,7 +532,7 @@ export class Ambient {
     g.gain.setValueAtTime(0.012 + Math.random() * 0.012, at);
     g.gain.exponentialRampToValueAtTime(0.0004, at + 0.07);
     o.connect(g);
-    g.connect(v.out);
+    g.connect(v.bus);
     o.start(at);
     o.stop(at + 0.08);
   }
@@ -511,7 +544,7 @@ export class Ambient {
     g.gain.setValueAtTime(0.05 + Math.random() * 0.06, at);
     g.gain.exponentialRampToValueAtTime(0.0005, at + 0.012);
     s.connect(g);
-    g.connect(v.out);
+    g.connect(v.bus);
     s.start(at, Math.random() * 3, 0.015);
   }
   _chirp(at, v) {
@@ -527,8 +560,8 @@ export class Ambient {
     g.gain.linearRampToValueAtTime(0.018, at + 0.015);
     g.gain.exponentialRampToValueAtTime(0.0004, at + 0.12);
     o.connect(g);
-    g.connect(v.out);
-    g.connect(this.delay);
+    g.connect(v.bus);
+    g.connect(v.fx);
     o.start(at);
     o.stop(at + 0.13);
   }
@@ -539,8 +572,12 @@ export class Ambient {
   attach(el, { underwater = false } = {}) {
     if (!this.ctx) return;
     try {
-      const s = this.ctx.createMediaElementSource(el);
-      if (!underwater) return s.connect(this.an);
+      const s = this.ctx.createMediaElementSource(el),
+        gain = this.ctx.createGain();
+      gain.gain.value = 0;
+      gain.connect(this.an);
+      el.fade = gain; // the caller sets el.fade.gain for its fades (element.volume does nothing on iPhone)
+      if (!underwater) return s.connect(gain);
       const ctx = this.ctx,
         f1 = ctx.createBiquadFilter(),
         f2 = ctx.createBiquadFilter(),
@@ -564,8 +601,8 @@ export class Ambient {
       s.connect(f1);
       f1.connect(f2);
       f2.connect(lvl);
-      lvl.connect(this.an);
-      lvl.connect(echo);
+      lvl.connect(gain);
+      gain.connect(echo);
       echo.connect(this.delay);
     } catch (e) {
       console.warn(e);

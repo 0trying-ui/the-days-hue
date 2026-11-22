@@ -503,7 +503,7 @@ function applySettings() {
   if (songEl) songEl.muted = !settings.sound;
   if (bgmEl) {
     bgmEl.muted = !settings.sound;
-    bgmEl.volume = Math.max(0.15, settings.volume);
+    vol(bgmEl, Math.max(0.15, settings.volume));
   }
   document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.v === settings.ui));
   document.querySelector('.seg').classList.toggle('r', settings.ui === 'light');
@@ -1308,15 +1308,23 @@ addEventListener(
   },
   true,
 );
+function vol(el, v) {
+  const g = el && el.fade;
+  if (v === undefined) return g ? g.gain.value : el.volume;
+  if (g) {
+    el.volume = 1;
+    g.gain.value = v;
+  } else el.volume = v;
+}
 function stopBgmEl() {
   if (!bgmEl) return;
   const el = bgmEl;
   bgmEl = null;
-  const v0 = el.volume,
+  const v0 = vol(el),
     t0 = performance.now();
   const step = () => {
     const k = Math.min(1, (performance.now() - t0) / (MUSIC_FADE_SEC * 1000));
-    el.volume = v0 * (1 - k);
+    vol(el, v0 * (1 - k));
     if (k < 1) requestAnimationFrame(step);
     else el.pause();
   };
@@ -1336,8 +1344,8 @@ function playBgm() {
     const el = new Audio(URL.createObjectURL(own.blob));
     el.loop = true;
     el.muted = !settings.sound;
-    el.volume = 0;
     snd.attach(el);
+    vol(el, 0);
     bgmEl = el;
     playMedia(el);
     const tv = Math.max(0.15, settings.volume),
@@ -1345,7 +1353,7 @@ function playBgm() {
     const step = () => {
       if (bgmEl !== el) return;
       const k = Math.min(1, (performance.now() - t0) / (MUSIC_FADE_SEC * 1000));
-      el.volume = tv * k;
+      vol(el, tv * k);
       if (k < 1) requestAnimationFrame(step);
     };
     step();
@@ -1883,7 +1891,7 @@ const EMBED_QUIET = 0.6,
 function startSongPart(el, audio) {
   // a song from a link cannot be filtered (it plays in the service's own player): it is only quieter
   el.baseVol = Math.max(0.3, settings.volume) * (el.svc ? EMBED_QUIET : 1);
-  el.volume = 0;
+  vol(el, 0);
   el.seg = {
     a: audio.start != null ? audio.start : null,
     b: audio.end || 0,
@@ -1908,7 +1916,7 @@ function startSongPart(el, audio) {
     if (t >= s.b - 0.1 || t < s.a - 1.5) {
       // the end of the part: a moment of silence, then from its start again
       el.gap = true;
-      el.volume = 0;
+      vol(el, 0);
       el.pause();
       setTimeout(() => {
         el.gap = false;
@@ -1920,7 +1928,7 @@ function startSongPart(el, audio) {
     }
     const env = Math.max(0, Math.min(1, (t - s.a) / SONG_FADE_IN_SEC, (s.b - t) / SONG_FADE_OUT_SEC));
     const v = el.baseVol * env;
-    if (Math.abs((el.lastVol ?? -1) - v) > 0.004) el.volume = el.lastVol = v;
+    if (Math.abs((el.lastVol ?? -1) - v) > 0.004) vol(el, (el.lastVol = v));
   }, SONG_TICK_MS);
 }
 function setupSeek(pe, d) {
@@ -1990,7 +1998,7 @@ function stopSong() {
   const el = songEl;
   songEl = null;
   clearInterval(el.fadeTimer);
-  const v0 = el.paused ? 0 : el.volume,
+  const v0 = el.paused ? 0 : vol(el),
     t0 = performance.now(),
     end = () => {
       el.pause();
@@ -1999,7 +2007,7 @@ function stopSong() {
   if (!v0 || el.svc === 'spotify') return end();
   const step = () => {
     const k = Math.min(1, (performance.now() - t0) / SONG_LEAVE_MS);
-    el.volume = v0 * (1 - k);
+    vol(el, v0 * (1 - k));
     if (k < 1) setTimeout(step, SONG_TICK_MS);
     else end();
   };
