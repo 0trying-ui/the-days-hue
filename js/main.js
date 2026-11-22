@@ -1,6 +1,6 @@
 import { Engine, moodToneHex } from './scene.js';
 import { Sky } from './sky.js';
-import { Ambient } from './sound.js';
+import { Ambient, MUSIC_FADE_SEC } from './sound.js';
 import { liquid } from './glass.js';
 import { startTrail } from './trail.js';
 import { playRitual, ritualTarget, RITUAL_FALL_SEC } from './ritual.js';
@@ -1315,7 +1315,7 @@ function stopBgmEl() {
   const v0 = el.volume,
     t0 = performance.now();
   const step = () => {
-    const k = Math.min(1, (performance.now() - t0) / 900);
+    const k = Math.min(1, (performance.now() - t0) / (MUSIC_FADE_SEC * 1000));
     el.volume = v0 * (1 - k);
     if (k < 1) requestAnimationFrame(step);
     else el.pause();
@@ -1344,7 +1344,7 @@ function playBgm() {
       t0 = performance.now();
     const step = () => {
       if (bgmEl !== el) return;
-      const k = Math.min(1, (performance.now() - t0) / 1400);
+      const k = Math.min(1, (performance.now() - t0) / (MUSIC_FADE_SEC * 1000));
       el.volume = tv * k;
       if (k < 1) requestAnimationFrame(step);
     };
@@ -1875,10 +1875,10 @@ function songRange() {
    and after a short silence plays again. A part cut in the form (with its own end) keeps its length. */
 const EMBED_QUIET = 0.6,
   SONG_PART_SEC = 50,
-  SONG_FADE_IN_SEC = 3,
-  SONG_FADE_OUT_SEC = 6,
+  SONG_FADE_IN_SEC = MUSIC_FADE_SEC,
+  SONG_FADE_OUT_SEC = 3,
   SONG_GAP_MS = 1500,
-  SONG_LEAVE_MS = 1200,
+  SONG_LEAVE_MS = MUSIC_FADE_SEC * 1000,
   SONG_TICK_MS = 50;
 function startSongPart(el, audio) {
   // a song from a link cannot be filtered (it plays in the service's own player): it is only quieter
@@ -1999,7 +1999,7 @@ function stopSong() {
   if (!v0 || el.svc === 'spotify') return end();
   const step = () => {
     const k = Math.min(1, (performance.now() - t0) / SONG_LEAVE_MS);
-    el.volume = v0 * (1 - k) * (1 - k);
+    el.volume = v0 * (1 - k);
     if (k < 1) setTimeout(step, SONG_TICK_MS);
     else end();
   };
@@ -2061,7 +2061,7 @@ function openDayView(d) {
   }
   if (snd.ctx) {
     const t = d.mood.tempo;
-    snd.play(d.mood.kind, { bpm: t ? Math.max(44, Math.min(120, t > 125 ? t / 2 : t)) : undefined });
+    snd.play(d.mood.kind, { bpm: t ? Math.max(44, Math.min(120, t > 125 ? t / 2 : t)) : undefined, underwater: true });
   }
 }
 function backToArchive() {
@@ -2941,7 +2941,73 @@ function renderCut(moved) {
       : b === cut.dur
         ? `Играет около минуты с ${mmss(a)}`
         : `Играет с ${mmss(a)} до ${mmss(b)}`;
-  for (const id of ['cut-a', 'cut-b']) setRangeFill($(id));
+  placeCut(a, b);
+}
+/* SongCut range: one track with two round knobs (start and end) over the whole song, made for a finger and
+   a mouse alike. A press anywhere moves the nearer knob there; arrows move a focused knob by a second
+   (Page Up / Page Down by ten). The values live in the hidden #cut-a / #cut-b, so the rest stays the same. */
+function placeCut(a, b) {
+  const r = $('cut-range'),
+    d = Math.max(1, cut.dur);
+  r.style.setProperty('--fa', (a / d).toFixed(4));
+  r.style.setProperty('--fb', (b / d).toFixed(4));
+  // under the track: the song's own beginning and length (the chosen part is written above)
+  $('cut-ta').textContent = '0:00';
+  $('cut-tb').textContent = mmss(cut.dur);
+  for (const [k, v] of [
+    ['cut-ka', a],
+    ['cut-kb', b],
+  ]) {
+    $(k).setAttribute('aria-valuemin', '0');
+    $(k).setAttribute('aria-valuemax', String(cut.dur));
+    $(k).setAttribute('aria-valuenow', String(v));
+    $(k).setAttribute('aria-valuetext', mmss(v));
+  }
+}
+function setCut(which, v) {
+  const inp = $(which === 'a' ? 'cut-a' : 'cut-b');
+  inp.value = Math.round(Math.max(0, Math.min(cut.dur, v)));
+  inp.dispatchEvent(new Event('input'));
+}
+{
+  const r = $('cut-range');
+  let drag = null;
+  const at = e => {
+    const box = r.getBoundingClientRect(),
+      k = 14; // half a knob: the track starts and ends at the knob centres
+    return (Math.max(0, Math.min(1, (e.clientX - box.left - k) / Math.max(1, box.width - 2 * k))) * cut.dur);
+  };
+  r.addEventListener('pointerdown', e => {
+    if (!cut.dur) return;
+    const v = at(e),
+      a = +$('cut-a').value,
+      b = +$('cut-b').value;
+    drag = e.target.id === 'cut-ka' ? 'a' : e.target.id === 'cut-kb' ? 'b' : Math.abs(v - a) <= Math.abs(v - b) ? 'a' : 'b';
+    r.setPointerCapture(e.pointerId);
+    r.classList.add('drag');
+    $(drag === 'a' ? 'cut-ka' : 'cut-kb').classList.add('on');
+    setCut(drag, v);
+    e.preventDefault();
+  });
+  r.addEventListener('pointermove', e => drag && setCut(drag, at(e)));
+  const end = () => {
+    drag = null;
+    r.classList.remove('drag');
+    $('cut-ka').classList.remove('on');
+    $('cut-kb').classList.remove('on');
+  };
+  r.addEventListener('pointerup', end);
+  r.addEventListener('pointercancel', end);
+  for (const [id, which] of [
+    ['cut-ka', 'a'],
+    ['cut-kb', 'b'],
+  ])
+    $(id).addEventListener('keydown', e => {
+      const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -10, PageUp: 10 }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      setCut(which, +$(which === 'a' ? 'cut-a' : 'cut-b').value + step);
+    });
 }
 $('cut-a').oninput = () => (renderCut('a'), cut.el && !cut.el.paused && (cut.el.currentTime = +$('cut-a').value));
 $('cut-b').oninput = () => renderCut('b');

@@ -143,6 +143,8 @@ export const PRESETS = {
 };
 
 // the day's song heard from under water (see attach)
+// music (the generated ambient, own tracks, the day's song) rises from silence and dies away over this
+export const MUSIC_FADE_SEC = 3;
 const UNDERWATER_HZ = 750,
   UNDERWATER_SWAY_HZ = 160,
   UNDERWATER_LEVEL = 0.8;
@@ -222,7 +224,8 @@ export class Ambient {
     clearTimeout(v.timer);
     const t = this.ctx.currentTime;
     v.out.gain.cancelScheduledValues(t);
-    v.out.gain.setTargetAtTime(0, t, 0.7);
+    v.out.gain.setValueAtTime(v.out.gain.value, t);
+    v.out.gain.linearRampToValueAtTime(0, t + MUSIC_FADE_SEC);
     setTimeout(() => {
       v.nodes.forEach(n => {
         try {
@@ -236,20 +239,31 @@ export class Ambient {
     const ctx = this.ctx,
       v = { dead: false, nodes: [], timer: 0 };
     v.out = ctx.createGain();
-    v.out.gain.value = 0;
-    v.out.gain.setTargetAtTime(1, ctx.currentTime, 1.2);
+    v.out.gain.setValueAtTime(0, ctx.currentTime);
+    v.out.gain.linearRampToValueAtTime(p.underwater ? UNDERWATER_LEVEL : 1, ctx.currentTime + MUSIC_FADE_SEC);
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = p.cutoff;
+    lp.frequency.value = p.underwater ? Math.min(p.cutoff, UNDERWATER_HZ) : p.cutoff;
     lp.Q.value = 0.6;
-    lp.connect(v.out);
+    if (p.underwater) {
+      // inside a day the music is heard from under water, like the day's own song: a second low-pass
+      // makes the cut steep (24 dB/oct), and the cut-off sways slowly (the LFO below)
+      const lp2 = ctx.createBiquadFilter();
+      lp2.type = 'lowpass';
+      lp2.frequency.value = lp.frequency.value;
+      lp2.Q.value = 0.6;
+      lp.connect(lp2);
+      lp2.connect(v.out);
+      v.lp2 = lp2;
+    } else lp.connect(v.out);
     v.out.connect(this.master);
     const lfo = ctx.createOscillator(),
       lg = ctx.createGain();
     lfo.frequency.value = 0.07;
-    lg.gain.value = p.cutoff * 0.25;
+    lg.gain.value = p.underwater ? UNDERWATER_SWAY_HZ : p.cutoff * 0.25;
     lfo.connect(lg);
     lg.connect(lp.frequency);
+    if (v.lp2) lg.connect(v.lp2.frequency);
     lfo.start();
     v.nodes.push(lfo);
     const beat = 60 / p.bpm,

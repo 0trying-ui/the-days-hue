@@ -276,8 +276,14 @@
                 </button>
                 <span id="cut-txt"></span>
               </div>
-              <label class="cut-l">Начало<input id="cut-a" type="range" min="0" max="1" step="1" value="0" /></label>
-              <label class="cut-l">Конец<input id="cut-b" type="range" min="0" max="1" step="1" value="1" /></label>
+              <div id="cut-range" class="cut-range">
+                <div class="cut-track"><i class="cut-fill"></i></div>
+                <button type="button" id="cut-ka" class="cut-k" role="slider" aria-label="Начало фрагмента"></button>
+                <button type="button" id="cut-kb" class="cut-k" role="slider" aria-label="Конец фрагмента"></button>
+              </div>
+              <div class="cut-times"><span id="cut-ta">0:00</span><span id="cut-tb">0:00</span></div>
+              <input id="cut-a" type="range" min="0" max="1" step="1" value="0" hidden />
+              <input id="cut-b" type="range" min="0" max="1" step="1" value="1" hidden />
             </div>
             <input id="f-link" type="url" placeholder="или вставь ссылку на песню" />
             <p id="f-linkst" class="fine"></p>
