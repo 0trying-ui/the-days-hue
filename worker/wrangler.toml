@@ -1,0 +1,37 @@
+name = "ottenok-dnya-ai"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+# Адреса сайта, которым можно обращаться к прокси (через запятую).
+ALLOWED_ORIGINS = "https://the-days-hue.tryfx.workers.dev,http://localhost:5173"
+# Основная модель анализа: Flash-Lite быстрее, и бесплатный дневной лимит у неё намного больше, чем у Flash.
+GEMINI_MODEL = "gemini-flash-lite-latest"
+# Если основная перегружена или кончилась: следующая Gemini, потом Cloudflare Workers AI (binding AI ниже).
+GEMINI_FALLBACK = "gemini-3.8-flash"
+GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
+# Модель Cloudflare Workers AI для запасного анализа (без фото, только текст).
+CF_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+# Дневная норма на одного посетителя, чтобы один человек не съел общий бесплатный лимит.
+LIMIT_DAYS = "20"
+# Озвучки на посетителя. Бесплатный Gemini TTS даёт всего 10 в день на весь ключ: сверх них читает голос браузера.
+LIMIT_VOICES = "30"
+# Диктовки (речь в текст: Groq Whisper, запасной — Cloudflare Workers AI) в день на посетителя.
+LIMIT_DICT = "20"
+
+# Cloudflare Workers AI: запасной ИИ на том же аккаунте, без отдельного ключа.
+[ai]
+binding = "AI"
+
+# Счётчики «сколько потрачено сегодня» для каждого посетителя (по хешу адреса, сам адрес не хранится).
+[[durable_objects.bindings]]
+name = "USAGE"
+class_name = "Usage"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Usage"]
+
+# Ключи НЕ пишутся сюда. Добавь их как секреты:
+#   npx wrangler secret put GEMINI_API_KEY   (озвучка и запасной анализ)
+#   npx wrangler secret put GROQ_API_KEY     (по желанию: анализ и диктовка идут через Groq первыми)

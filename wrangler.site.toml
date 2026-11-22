@@ -1,0 +1,9 @@
+# Public site: static files from dist/ only (built by `node build.mjs`).
+# Deploy: node build.mjs && npx wrangler deploy -c wrangler.site.toml
+name = "the-days-hue"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./dist"
+not_found_handling = "404-page"
+html_handling = "auto-trailing-slash"

@@ -1,0 +1,15 @@
+# build output and local tools
+dist/
+.wrangler/
+worker/.wrangler/
+node_modules/
+.dev.vars
+.env
+.env.*
+# local editor / assistant settings
+.claude/
+# working files, not part of the project
+screenshots/
+*.mp4
+ui-variants.png
+ai-variants.png

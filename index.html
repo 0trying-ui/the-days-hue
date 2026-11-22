@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="ru" data-theme="night">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' https://ottenok-dnya-ai.tryfx.workers.dev; frame-src https://open.spotify.com https://w.soundcloud.com; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <title>Оттенок дня — дневник, где день становится краской</title>
+    <meta
+      name="description"
+      content="Личный дневник: запиши день, добавь фото и песню, и он превратится в живое пятно краски с погодой, музыкой и голосом. Каждый день — место, куда можно вернуться."
+    />
+    <meta name="theme-color" content="#0b0c17" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:site_name" content="Оттенок дня" />
+    <meta property="og:title" content="Оттенок дня — дневник, где день становится краской" />
+    <meta property="og:description" content="Запиши день, добавь фото и песню — и войди внутрь своего воспоминания." />
+    <meta property="og:image" content="https://the-days-hue.tryfx.workers.dev/assets/og-image.png" />
+    <meta property="og:url" content="https://the-days-hue.tryfx.workers.dev/" />
+    <link rel="canonical" href="https://the-days-hue.tryfx.workers.dev/" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Цветные пятна краски на тёмном фоне — дни из дневника" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <canvas id="gl" aria-label="Архив дней"></canvas>
+    <canvas id="sky" aria-hidden="true"></canvas>
+    <canvas id="links" class="fxc" aria-hidden="true"></canvas>
+    <div id="labels" class="labels" aria-hidden="true"></div>
+    <canvas id="fx" class="fxc" aria-hidden="true"></canvas>
+    <div id="stage" class="stage"><div id="world" class="world"></div></div>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="vignette" aria-hidden="true"></div>
+    <div id="hint" class="hint"></div>
+
+    <section id="intro" class="intro">
+      <div class="intro-inner">
+        <p class="kicker">make the invisible visible</p>
+        <h1>Оттенок дня</h1>
+        <p class="lead">
+          Каждый прожитый день становится пятном краски. Запиши его, добавь фото и песню, и он станет местом, куда можно
+          вернуться.
+        </p>
+        <button id="enter" class="pill lg-solid">Войти</button>
+        <p class="legal"><a href="privacy.html">Конфиденциальность</a> · <a href="terms.html">Условия</a></p>
+      </div>
+    </section>
+
+    <div id="tagbar" class="tagbar hidden"></div>
+
+    <nav id="dock" class="dock hidden" aria-label="Управление">
+      <button id="b-add" class="orb glass" aria-label="Новый день">
+        <svg id="i-add" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+        <svg id="i-back" viewBox="0 0 24 24" class="hidden"><path d="M14.5 5.5 8 12l6.5 6.5" /></svg>
+      </button>
+      <div id="bar" class="bar glass">
+        <div id="rib" class="rib" role="slider" aria-label="Лента времени" tabindex="0">
+          <div id="trackGlow" class="track-glow gap"></div>
+          <div id="track" class="track gap">
+            <div class="track-base"></div>
+            <div id="trackAll" class="track-c"></div>
+            <div id="trackDay" class="track-c day"></div>
+          </div>
+          <div id="ticks" class="ticks gap"></div>
+          <div class="bulge-w gap" aria-hidden="true"><div id="bulge" class="bulge"></div></div>
+          <div id="ribMarks" class="rib-marks" aria-hidden="true"></div>
+          <div id="ribTip" class="rib-tip glass" aria-hidden="true"></div>
+          <div id="thumb" class="thumb"><i></i></div>
+        </div>
+      </div>
+      <div class="duo glass">
+        <button id="b-snd" class="ib" aria-label="Звук" aria-pressed="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z" />
+            <path class="w1" d="M15.5 9.2a4 4 0 0 1 0 5.6" />
+            <path class="w2" d="M18 6.8a7.5 7.5 0 0 1 0 10.4" />
+            <path class="mx" d="M16 9.5l5 5M21 9.5l-5 5" />
+          </svg>
+        </button>
+        <span class="sep"></span>
+        <button id="b-menu" class="ib" aria-label="Меню" aria-expanded="false">
+          <svg viewBox="0 0 24 24">
+            <circle cx="6" cy="12" r="1.3" />
+            <circle cx="12" cy="12" r="1.3" />
+            <circle cx="18" cy="12" r="1.3" />
+          </svg>
+        </button>
+      </div>
+    </nav>
+
+    <div id="menu" class="menu gone" role="menu" aria-label="Меню"></div>
+    <div id="plabel" class="plabel glass" aria-hidden="true"></div>
+
+    <aside id="settings" class="sheet glass" aria-label="Настройки">
+      <div class="sc">
+        <h3>Настройки</h3>
+        <p class="gl">Искусственный интеллект</p>
+        <div class="grp">
+          <div class="gr ai-st">
+            <span>ИИ</span><span class="r"><i id="ai-dot" class="ai-dot"></i><span id="ai-status">Не настроен</span></span>
+          </div>
+          <label class="gr sw"
+            >ИИ-анализ дня<input id="s-ai" type="checkbox" role="switch" /><span class="switch"></span
+          ></label>
+          <label class="gr sw"
+            >ИИ-голос для заметок<input id="s-aivoice" type="checkbox" role="switch" /><span class="switch"></span
+          ></label>
+          <button id="s-perf" class="gr act more">Оптимизация<span id="s-perf-n" class="r"></span></button>
+          <button id="s-ailim" class="gr act more">Лимиты на сегодня<span id="s-ailim-n" class="r"></span></button>
+        </div>
+        <p class="fine gf">
+          Заметки, фото и данные о песне уходят в ИИ (сначала Groq, запасные — Google Gemini и Cloudflare Workers AI)
+          только когда ты создаёшь день или просишь прочитать вслух.
+        </p>
+        <p class="gl">Тема</p>
+        <div class="seg" role="radiogroup" aria-label="Тема интерфейса">
+          <button data-v="dark">Тёмная</button><button data-v="light">Светлая</button><i></i>
+        </div>
+        <div class="grp">
+          <label class="gr col">Скорость<input id="s-speed" type="range" min="0.2" max="2" step="0.05" /></label>
+          <label class="gr col"
+            >Интенсивность<input id="s-intensity" type="range" min="0.3" max="1.6" step="0.05"
+          /></label>
+          <label class="gr col"
+            >Звёзды на фоне<input id="s-density" type="range" min="0.3" max="1.6" step="0.05"
+          /></label>
+          <label class="gr sw"
+            >Без движения<input id="s-reduce" type="checkbox" role="switch" /><span class="switch"></span
+          ></label>
+        </div>
+        <p class="gl">Звук</p>
+        <div class="grp">
+          <label class="gr col">Громкость<input id="s-volume" type="range" min="0" max="1" step="0.02" /></label>
+        </div>
+        <p class="gl">Данные</p>
+        <div class="grp">
+          <button id="s-install" class="gr act hidden">Установить как приложение</button>
+          <button id="s-demo" class="gr act">Вернуть демо-дни</button>
+          <button id="s-clear" class="gr act danger">Удалить все дни</button>
+        </div>
+        <p class="fine gf"><a href="privacy.html">Конфиденциальность</a> · <a href="terms.html">Условия</a></p>
+      </div>
+    </aside>
+    <aside id="ailim" class="sheet glass" aria-label="ИИ: лимиты на сегодня">
+      <div class="sc">
+        <button id="ailim-back" class="back">‹ Настройки</button>
+        <h3>ИИ</h3>
+        <div class="grp">
+          <div class="gr ai-st">
+            <span>Состояние</span><span class="r"><i id="lim-dot" class="ai-dot"></i><span id="lim-st">Проверяю…</span></span>
+          </div>
+          <div class="gr ai-st"><span>Модель</span><span id="lim-model" class="r">—</span></div>
+        </div>
+        <p class="gl">Сегодня</p>
+        <div class="grp">
+          <div class="gr lim">
+            <span>Дни с ИИ</span><span id="lim-days-n" class="r">—</span>
+            <div class="limbar"><i id="lim-days-b"></i></div>
+          </div>
+          <div class="gr lim">
+            <span>Диктовки</span><span id="lim-dict-n" class="r">—</span>
+            <div class="limbar"><i id="lim-dict-b"></i></div>
+          </div>
+          <div class="gr lim">
+            <span>Озвучки</span><span id="lim-voices-n" class="r">—</span>
+            <div class="limbar"><i id="lim-voices-b"></i></div>
+          </div>
+        </div>
+        <p id="lim-note" class="fine gf"></p>
+      </div>
+    </aside>
+    <aside id="perf" class="sheet glass" aria-label="Оптимизация">
+      <div class="sc">
+        <button id="perf-back" class="back">‹ Настройки</button>
+        <h3>Оптимизация</h3>
+        <p class="fine gf">
+          Сайт и так подстраивает качество под устройство. Если всё равно тормозит или греется — выключи лишнее.
+        </p>
+        <div class="grp" id="perf-list"></div>
+        <button id="perf-all" class="pill">Максимальная экономия</button>
+      </div>
+    </aside>
+    <aside id="music" class="sheet glass" aria-label="Фоновая музыка">
+      <div class="sc">
+        <h3>Музыка на главной</h3>
+        <div id="bgm-list" class="opts" role="radiogroup"></div>
+        <label class="pill file-pill">Загрузить свой трек<input id="bgm-file" type="file" accept="audio/*" /></label>
+      </div>
+    </aside>
+    <aside id="why" class="sheet glass" aria-label="Почему день выглядит так">
+      <div class="sc">
+        <h3>Почему день выглядит так</h3>
+        <ul id="why-list"></ul>
+      </div>
+    </aside>
+
+    <div id="modal" class="modal bmodal hidden" role="dialog" aria-modal="true" aria-label="Новый день">
+      <form id="form" class="card glass bsheet" novalidate>
+        <div id="grab" class="grab" aria-hidden="true"><i></i></div>
+        <div class="bhead">
+          <button type="button" id="f-cancel" class="tbtn">Отмена</button>
+          <h3>Новый день</h3>
+          <button type="submit" class="tbtn strong">Создать</button>
+        </div>
+        <div class="sc">
+          <p class="bq">Как прошёл день?</p>
+          <div class="field">
+            <span class="lbl">Дата</span>
+            <button type="button" id="f-datebtn" class="datebtn">
+              <svg viewBox="0 0 24 24">
+                <rect x="4" y="5.5" width="16" height="14" rx="3" />
+                <path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" /></svg
+              ><span id="f-datetxt"></span><svg class="chev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" /></svg>
+            </button>
+            <div id="cal" class="cal"></div>
+            <input id="f-date" type="hidden" />
+          </div>
+          <div id="f-titlefield" class="field hidden">
+            <label class="lbl" for="f-title">Название дня</label>
+            <input id="f-title" type="text" maxlength="60" placeholder="Например: Вечер у пруда с какао" />
+            <p class="fine">
+              ИИ сейчас не используется — назови день сам или оставь пустым, название подберётся по заметкам.
+            </p>
+          </div>
+          <div class="field">
+            <span class="lbl">Заметки дня</span>
+            <div id="notes" class="notes"></div>
+            <div class="note-acts">
+              <button type="button" id="f-addnote" class="ghostbtn">+ ещё заметка</button>
+              <button type="button" id="f-mic" class="ghostbtn mic hidden" aria-pressed="false">
+                <svg viewBox="0 0 24 24">
+                  <rect x="9" y="3" width="6" height="11" rx="3" />
+                  <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></svg
+                ><span id="f-mictxt">Надиктовать</span>
+              </button>
+            </div>
+          </div>
+          <div class="field">
+            <span class="lbl">Фото дня <em id="f-phcount"></em></span>
+            <div id="f-prev" class="prev">
+              <label class="addph" aria-label="Добавить фото"
+                ><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12" /></svg
+                ><input id="f-photos" type="file" accept="image/*" multiple
+              /></label>
+            </div>
+          </div>
+          <div class="field">
+            <span class="lbl">Песня дня</span>
+            <div id="f-recent" class="recent hidden"></div>
+            <label class="filebtn"
+              ><svg viewBox="0 0 24 24">
+                <path d="M9 18V6l10-2v12" />
+                <circle cx="6.5" cy="18" r="2.5" />
+                <circle cx="16.5" cy="16" r="2.5" /></svg
+              ><span id="f-audiotxt">Выбрать аудиофайл</span><input id="f-audio" type="file" accept="audio/*"
+            /></label>
+            <div id="f-cut" class="cut hidden">
+              <div class="cut-row">
+                <button type="button" id="cut-play" class="cut-play" aria-label="Послушать фрагмент">
+                  <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" /></svg>
+                </button>
+                <span id="cut-txt"></span>
+              </div>
+              <label class="cut-l">Начало<input id="cut-a" type="range" min="0" max="1" step="1" value="0" /></label>
+              <label class="cut-l">Конец<input id="cut-b" type="range" min="0" max="1" step="1" value="1" /></label>
+            </div>
+            <input id="f-link" type="url" placeholder="или вставь ссылку на песню" />
+            <p id="f-linkst" class="fine"></p>
+          </div>
+          <div class="field">
+            <span class="lbl">Обложка</span>
+            <div class="cv-prev">
+              <div class="album-art" aria-hidden="true">
+                <div class="record">
+                  <div class="disc"></div>
+                  <div class="sheen"></div>
+                </div>
+                <div class="sleeve"><i class="cover-photo" id="cv-img"></i><i class="cover-gloss"></i></div>
+              </div>
+              <p class="fine">Так пластинка будет выглядеть в дне</p>
+            </div>
+            <div class="cv-tabs" role="tablist">
+              <button type="button" role="tab" data-t="photo">Фото</button
+              ><button type="button" role="tab" data-t="link">Ссылка</button
+              ><button type="button" role="tab" data-t="gen">Готовые</button
+              ><button type="button" role="tab" data-t="own">Своя</button>
+            </div>
+            <div id="cv-tiles" class="cv-tiles"></div>
+            <input id="cv-file" type="file" accept="image/*" hidden />
+          </div>
+          <p id="f-err" class="err"></p>
+          <button type="submit" class="pill lg-solid wide">Создать воспоминание</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="dlg" class="modal hidden" role="dialog" aria-modal="true">
+      <form id="dlg-form" class="card glass small">
+        <h3 id="dlg-title"></h3>
+        <input id="dlg-input" type="text" />
+        <div class="row end">
+          <button type="button" id="dlg-cancel" class="pill">Отмена</button
+          ><button type="submit" id="dlg-ok" class="pill lg-solid">Готово</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="memo" class="memo glass" role="status" aria-live="polite"></div>
+    <div id="veil" class="veil"></div>
+    <div id="toast" class="toast glass"></div>
+    <div id="embedbox" class="embedbox glass" aria-label="Плеер песни дня"></div>
+    <div id="busy" class="busy glass hidden">собираю воспоминание…</div>
+    <div id="empty" class="empty hidden">Здесь пока нет дней. Нажми «+» внизу.</div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>

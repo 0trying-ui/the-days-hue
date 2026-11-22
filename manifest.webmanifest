@@ -1,0 +1,15 @@
+{
+  "name": "Оттенок дня",
+  "short_name": "Оттенок дня",
+  "description": "Личный дневник, где каждый день становится пятном краски.",
+  "lang": "ru",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#05060d",
+  "theme_color": "#0b0c17",
+  "icons": [
+    { "src": "assets/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "assets/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
