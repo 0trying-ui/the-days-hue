@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' https://ottenok-dnya-ai.tryfx.workers.dev; frame-src https://open.spotify.com https://w.soundcloud.com; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' data: blob: https://audio-ssl.itunes.apple.com; connect-src 'self' https://ottenok-dnya-ai.tryfx.workers.dev https://itunes.apple.com; frame-src https://open.spotify.com https://w.soundcloud.com; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"
     />
     <meta name="referrer" content="no-referrer" />
     <title>Оттенок дня — дневник, где день становится краской</title>
@@ -128,7 +128,7 @@
           только когда ты создаёшь день или просишь прочитать вслух.
         </p>
         <p class="gl">Тема</p>
-        <div class="seg" role="radiogroup" aria-label="Тема интерфейса">
+        <div id="s-ui" class="seg" role="radiogroup" aria-label="Тема интерфейса">
           <button data-v="dark">Тёмная</button><button data-v="light">Светлая</button><i></i>
         </div>
         <div class="grp">
@@ -284,6 +284,12 @@
               <div class="cut-times"><span id="cut-ta">0:00</span><span id="cut-tb">0:00</span></div>
               <input id="cut-a" type="range" min="0" max="1" step="1" value="0" hidden />
               <input id="cut-b" type="range" min="0" max="1" step="1" value="1" hidden />
+              <label class="cut-vol">Громкость<input id="cut-vol" type="range" min="0.1" max="1" step="0.05" value="1" /></label>
+              <div id="cut-fx" class="seg seg3" role="radiogroup" aria-label="Эффект песни">
+                <button type="button" data-fx="underwater" class="on">Под водой</button
+                ><button type="button" data-fx="soft">Мягко</button
+                ><button type="button" data-fx="none">Без эффекта</button><i></i>
+              </div>
             </div>
             <input id="f-link" type="url" placeholder="или вставь ссылку на песню" />
             <p id="f-linkst" class="fine"></p>

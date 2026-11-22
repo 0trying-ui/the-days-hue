@@ -114,7 +114,7 @@ const SYSTEM = `Ты художник-колорист и бережный ре�
 - mood: одно из calm (спокойный, тёплый), tense (напряжённый, собранный, тревожный), bright (яркий, радостный, живой), melancholy (задумчивый, грустный, тихий). Определи по событиям и чувствам в заметках.
 - colors: ровно 3 цвета в формате #rrggbb, которые рассказывают о событиях и местах дня в его настроении: море и пляж — лазурь, бирюза, песок; закат — коралл, золото; снег и зима — холодный белый, голубой; осенний парк — охра, медь; ночной офис и дедлайн — индиго, холодный неон; концерт — пурпур, электрический розовый; дождь — серо-синий, мокрый асфальт; уютный дом — карамель, тёплый крем. Если есть фото — сверь с ними оттенки, но главное — события. Без кислотных и грязно-серых цветов. Первый цвет — главный.
 - title: название папки дня по-русски, 3–7 слов, образно, в одном тоне (например «Вечер у пруда с какао»), без кавычек, без даты, без точки.
-- fragments: раздели текст пользователя на 1–5 смысловых кусочков для отдельных листков. НЕ меняй, не дописывай и не сокращай слова пользователя, только раздели.
+- fragments: раздели текст пользователя на смысловые кусочки для отдельных листков: по одной мысли или сцене на листок, обычно 1–3 предложения. Если весь день написан одним сплошным текстом длиннее двух-трёх предложений — обязательно раздели его на 2–5 листков. Если заметок несколько, сохрани их деление (длинную заметку можно разделить дальше). НЕ меняй, не дописывай и не сокращай слова пользователя, только раздели.
 - spoken: те же кусочки в том же порядке и того же количества, но для чтения вслух: исправь опечатки, пропущенные и лишние буквы, раскладку, расставь знаки препинания и ё, раскрой сокращения так, как их произносят. Смысл, порядок и стиль не меняй, ничего не добавляй.
 - weather: какие погодные явления реально упомянуты или видны на фото: rain, snow, wind, sun, fog. Пустой список, если ничего нет.
 - why: 3–5 коротких предложений по-русски, почему день выглядит именно так: ссылайся на конкретные детали (слова, цвета на фото, темп песни).
@@ -361,6 +361,16 @@ async function getJson(url) {
   if (!r.ok) throw Object.assign(new Error('music service answered ' + r.status), { status: 404 });
   return r.json();
 }
+// Apple's official 30-second previews (made to be played freely); only their own audio host is accepted
+const PREVIEW_HOST = /^audio-ssl\.itunes\.apple\.com$/i;
+function safePreview(u) {
+  try {
+    const x = new URL(u);
+    return x.protocol === 'https:' && PREVIEW_HOST.test(x.hostname) ? x.href : '';
+  } catch {
+    return '';
+  }
+}
 async function coverInfo(link) {
   let u;
   try {
@@ -374,7 +384,23 @@ async function coverInfo(link) {
     const j = await getJson('https://open.spotify.com/oembed?url=' + encodeURIComponent(u.href));
     // what the site's player needs to play it: spotify:<type>:<id>
     const m = String(j.iframe_url || '').match(/^https:\/\/open\.spotify\.com\/embed\/(track|album|playlist|episode)\/([A-Za-z0-9]{10,32})/);
-    return { img: j.thumbnail_url, title: j.title || '', author: '', embed: m ? `spotify:${m[1]}:${m[2]}` : '' };
+    const out = { img: j.thumbnail_url, title: j.title || '', author: '', embed: m ? `spotify:${m[1]}:${m[2]}` : '' };
+    // Spotify gives no access to its sound: for a track, the song's name and artist from the public page, so
+    // the site can find Apple Music's official 30 s preview of it (Apple's search refuses Cloudflare's servers)
+    if (m && m[1] === 'track') {
+      try {
+        const r = await fetch('https://open.spotify.com/track/' + m[2], {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; diary-cover/1.0)', Accept: 'text/html' },
+          cf: { cacheTtl: 86400 },
+        });
+        const html = (await r.text()).slice(0, 300_000);
+        const d = ((html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/) || [])[1] || '').replace(/&amp;/g, '&').replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"');
+        const [artist, name] = d.split(' · ');
+        if (artist) out.author = artist;
+        if (name) out.song = name;
+      } catch {}
+    }
+    return out;
   }
   if (/(^|\.)soundcloud\.com$/.test(host) || host === 'on.soundcloud.com') {
     const j = await getJson('https://soundcloud.com/oembed?format=json&url=' + encodeURIComponent(u.href));
@@ -396,7 +422,7 @@ async function coverInfo(link) {
       const j = await getJson('https://itunes.apple.com/lookup?id=' + encodeURIComponent(id));
       const it = (j.results || [])[0] || {};
       const img = String(it.artworkUrl100 || '').replace(/\/\d+x\d+bb\./, '/600x600bb.');
-      if (img) return { img, title: it.trackName || it.collectionName || '', author: it.artistName || '' };
+      if (img) return { img, title: it.trackName || it.collectionName || '', author: it.artistName || '', preview: it.previewUrl || '' };
     } catch {}
     // the lookup API may refuse servers: read the cover from the public page's og:image instead
     const r = await fetch('https://music.apple.com' + u.pathname + u.search, {
@@ -437,6 +463,8 @@ async function cover(link, cors) {
       title: String(info.title).slice(0, 160),
       author: String(info.author).slice(0, 120),
       embed: String(info.embed || ''),
+      preview: safePreview(info.preview),
+      song: String(info.song || '').slice(0, 160),
     },
     200,
     cors,

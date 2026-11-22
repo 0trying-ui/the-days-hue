@@ -176,5 +176,42 @@ export async function aiCover(link) {
     title: typeof j.title === 'string' ? j.title.slice(0, 160) : '',
     author: typeof j.author === 'string' ? j.author.slice(0, 120) : '',
     embed: typeof j.embed === 'string' ? j.embed.slice(0, 200) : '',
+    // Apple Music's official 30 s preview of the same song (only from Apple's audio host)
+    preview:
+      safePreview(j.preview) ||
+      (/^spotify:track:/.test(j.embed || '') ? await applePreview(String(j.song || j.title || ''), String(j.author || '')).catch(() => '') : ''),
   };
+}
+
+/* Apple Music's official 30-second preview of a song, found by its name and artist (Apple's search answers
+   browsers directly). The name and, when known, the artist must match: a wrong song is worse than none;
+   the same version (Acoustic, Remix…) is preferred. */
+const PREVIEW_URL = /^https:\/\/audio-ssl\.itunes\.apple\.com\/[^"'\s]+$/;
+const safePreview = u => (typeof u === 'string' && PREVIEW_URL.test(u) ? u : '');
+const words = s => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const baseName = s => words(String(s || '').replace(/\(.*?\)|\[.*?\]| - .*$|feat\..*$/gi, ''));
+async function applePreview(title, artist) {
+  const t = baseName(title),
+    a = baseName(artist);
+  if (!t) return '';
+  const ac = new AbortController(),
+    timer = setTimeout(() => ac.abort(), 6000);
+  try {
+    const r = await fetch('https://itunes.apple.com/search?entity=song&limit=15&term=' + encodeURIComponent(`${t} ${a}`.trim()), { signal: ac.signal, credentials: 'omit' });
+    const j = await r.json();
+    let best = '',
+      top = 0;
+    for (const it of j.results || []) {
+      const n = baseName(it.trackName),
+        art = baseName(it.artistName);
+      let sc = n === t ? 2 : n && (n.includes(t) || t.includes(n)) ? 1 : 0;
+      if (!sc) continue;
+      if (words(it.trackName) === words(title)) sc += 1;
+      if (a) sc += art && (art.includes(a) || a.includes(art)) ? 2 : -9;
+      if (sc > top && safePreview(it.previewUrl)) (best = it.previewUrl), (top = sc);
+    }
+    return top >= 2 ? best : '';
+  } finally {
+    clearTimeout(timer);
+  }
 }

@@ -269,6 +269,9 @@ const PHONE_W = 700, // narrower than this counts as a phone
   PHONE_SPHERE_SHRINK = 1.5, // spheres are this many times smaller there
   TOUCH_SWIPE_GAIN = 1.8, // a finger moves the archive and the day this much further than a mouse drag
   TOUCH_DEPTH_PX = 240; // finger travel (px) for the whole way through a day (420 with a mouse)
+const DROP_MIN_FALL = 0.32, // the shortest fall to the water, as a share of the screen height
+  DROP_RISE_PART = 0.34, // share of the drop's time spent rising when it had to rise first
+  DROP_RISE_STRETCH = 1.45; // the drop takes this much longer when it rises first
 const MERGE_RATE = 2.2; // how fast spheres melt together or apart (per second)
 // height and depth of a slot in the line of spheres (gentle waves, so the line never looks ruled)
 function place(slot) {
@@ -491,7 +494,14 @@ export class Engine {
     if (i < 0) return Promise.resolve();
     const b = this.base[i];
     const [x, y, r] = this._proj(b.x, b.y, b.r * b.rsc, b.zd);
-    return new Promise(done => (this.drp = { i, t: 0, dur, from: { x, y, r }, to, done, sx: 1, sy: 1, now: { x, y, r, speed: 0 } }));
+    // a sphere that sits low has little room to fall: it is first tossed up to a height from which the
+    // fall to the water is long enough to read as a fall
+    const minFall = this.H * DROP_MIN_FALL,
+      apex = p => (p.to.y - p.from.y < minFall ? p.to.y - minFall : null);
+    const p = { i, t: 0, dur, from: { x, y, r }, to, sx: 1, sy: 1, now: { x, y, r, speed: 0 } };
+    p.apex = apex(p);
+    if (p.apex != null) p.dur = dur * DROP_RISE_STRETCH;
+    return new Promise(done => (this.drp = { ...p, done }));
   }
   dropScreen() {
     return this.drp ? this.drp.now : null;
@@ -503,11 +513,15 @@ export class Engine {
     p.t += dt;
     const k = Math.min(1, p.t / p.dur),
       ez = v => (v < 0.5 ? 2 * v * v : 1 - Math.pow(-2 * v + 2, 2) / 2),
-      // pull into a drop quickly, then fall the whole way with gravity (k² = constant acceleration)
+      // pull into a drop quickly, then fall the whole way with gravity (k² = constant acceleration);
+      // a low sphere first rises (slowing down, like something tossed up) and falls from the top
+      rise = p.apex != null ? DROP_RISE_PART : 0,
       shrink = ez(clamp(k / 0.3, 0, 1)),
-      fall = clamp((k - 0.1) / 0.9, 0, 1),
-      sx = p.from.x + (p.to.x - p.from.x) * ez(clamp(k / 0.5, 0, 1)),
-      sy = p.from.y + (p.to.y - p.from.y) * fall * fall,
+      fall = rise ? clamp((k - rise) / (1 - rise), 0, 1) : clamp((k - 0.1) / 0.9, 0, 1),
+      up = rise ? clamp(k / rise, 0, 1) : 1,
+      top = rise ? p.from.y + (p.apex - p.from.y) * (1 - (1 - up) * (1 - up)) : p.from.y,
+      sx = p.from.x + (p.to.x - p.from.x) * ez(clamp(k / (rise || 0.5), 0, 1)),
+      sy = k < rise ? top : (rise ? p.apex : p.from.y) + (p.to.y - (rise ? p.apex : p.from.y)) * fall * fall,
       sr = p.from.r + (p.to.r - p.from.r) * shrink;
     p.now = { x: sx, y: sy, r: sr, speed: fall };
     p.sx = 1 - 0.22 * fall;

@@ -928,6 +928,14 @@ textarea {
 .seg.r i {
   transform: translateX(100%);
 }
+/* three options (the song's effect in the form): the thumb moves by --k = 0, 1, 2 */
+.seg.seg3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+.seg.seg3 i {
+  width: calc((100% - 4px) / 3);
+  transform: translateX(calc(var(--k, 0) * 100%));
+}
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
@@ -3796,22 +3804,32 @@ input[type='range']:active::-webkit-slider-thumb {
 }
 .cut-track {
   position: absolute;
-  left: 14px;
-  right: 14px;
+  left: 0;
+  right: 0;
   top: 50%;
-  height: 6px;
-  margin-top: -3px;
-  border-radius: 3px;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
   background: var(--fill-2);
 }
 .cut-fill {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--fa) * 100%);
-  right: calc((1 - var(--fb)) * 100%);
-  border-radius: 3px;
+  left: calc(14px + var(--fa) * (100% - 28px));
+  right: calc(14px + (1 - var(--fb)) * (100% - 28px));
+  border-radius: 2px;
   background: var(--ios-blue);
+}
+/* the song's volume in the form: laid out like a slider in the menu (its name above, the slider below) */
+.cut-vol,
+.card .cut-vol {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  font: 500 13px var(--sans);
+  color: var(--ink);
 }
 .cut-k {
   position: absolute;
@@ -3880,4 +3898,19 @@ input[type='range']:active::-webkit-slider-thumb {
     height: 18px;
     margin-top: -9px;
   }
+}
+
+/* the timeline steps aside while a month splits or gathers (see ribbonAside in js/main.js) */
+.rib {
+  transition: opacity 0.35s var(--smooth);
+}
+.bar.aside .rib {
+  opacity: 0;
+}
+
+/* a short note under the day's song when the site cannot change its sound (a Spotify link) */
+.pnote {
+  margin-top: 6px;
+  font: 400 12px/1.35 var(--sans);
+  color: var(--dim);
 }

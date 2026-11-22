@@ -505,8 +505,8 @@ function applySettings() {
     bgmEl.muted = !settings.sound;
     vol(bgmEl, Math.max(0.15, settings.volume));
   }
-  document.querySelectorAll('.seg button').forEach(b => b.classList.toggle('on', b.dataset.v === settings.ui));
-  document.querySelector('.seg').classList.toggle('r', settings.ui === 'light');
+  document.querySelectorAll('#s-ui button').forEach(b => b.classList.toggle('on', b.dataset.v === settings.ui));
+  $('s-ui').classList.toggle('r', settings.ui === 'light');
   saveSettings(settings);
 }
 
@@ -553,11 +553,9 @@ const MONTH_FOCUS_MS = 260; // other months fade before the chosen one opens
 const MONTH_MELT_MS = 1100; // the opened nebula melts away while its days come out
 const DAY_STAGGER_SEC = 0.07; // days leave the nebula one after another
 // entering a month, step by step: the nebula splits into days around the camera, the days settle,
-// threads appear between them, then their dates, and only then the camera glides to the month's first day
+// threads appear between them, then their dates; the camera stays on the middle of the month
 const LINKS_AT_MS = 1300,
-  DATES_AT_MS = 1900,
-  GLIDE_AT_MS = 2600,
-  GLIDE_SEC = 1.5;
+  DATES_AT_MS = 1900;
 let level = 'months',
   curMonth = '';
 const ymOf = d => d.date.slice(0, 7);
@@ -638,9 +636,18 @@ function showLevel(keepId, opts) {
     );
 }
 let monthBusy = false;
+// the timeline pill is hidden while a month splits or gathers: it moves to its new place unseen and
+// fades back in there, instead of sliding across the track in the middle of the animation
+function ribbonAside(ms) {
+  const b = $('bar');
+  b.classList.add('aside');
+  clearTimeout(ribbonAside.t);
+  ribbonAside.t = setTimeout(() => b.classList.remove('aside'), settings.reduce ? 0 : ms);
+}
 function enterMonth(ym) {
   if (level !== 'months' || !ym || monthBusy) return;
   monthBusy = true;
+  ribbonAside(MONTH_FOCUS_MS + LINKS_AT_MS);
   engine.setFilter(d => d.month === ym);
   setTimeout(
     () => {
@@ -680,15 +687,7 @@ function enterMonth(ym) {
       const quick = settings.reduce;
       setTimeout(() => (linksT = 1), quick ? 0 : LINKS_AT_MS);
       setTimeout(() => engine.showLabels(true), quick ? 0 : DATES_AT_MS);
-      setTimeout(
-        () => {
-          if (level !== 'days' || curMonth !== ym || openDay) return;
-          engine.scrollTime = quick ? 0 : GLIDE_SEC;
-          engine.goTo(0);
-          setTimeout(() => (engine.scrollTime = 0), quick ? 0 : GLIDE_SEC * 2000);
-        },
-        quick ? 0 : GLIDE_AT_MS,
-      );
+      // the camera stays on the middle of the month (the pill in the centre): no glide to the first day
       // the other months keep fading while they melt; the days of this month are fully visible
       engine.setFilter(d => !d.nebula || d.month === ym);
       renderRibbon();
@@ -708,6 +707,7 @@ function enterMonth(ym) {
 function exitMonth() {
   if (level !== 'days' || openDay || monthBusy) return;
   monthBusy = true;
+  ribbonAside(MONTH_GATHER_MS + 600);
   engine.showLabels(false);
   linksT = 0;
   setTimeout(() => (engine.showLabels(true), (linksT = 1)), MONTH_GATHER_MS + 300);
@@ -1344,7 +1344,7 @@ function playBgm() {
     const el = new Audio(URL.createObjectURL(own.blob));
     el.loop = true;
     el.muted = !settings.sound;
-    snd.attach(el);
+    snd.attach(el, { soft: true });
     vol(el, 0);
     bgmEl = el;
     playMedia(el);
@@ -1359,7 +1359,7 @@ function playBgm() {
     step();
     return;
   }
-  snd.play(String(v).startsWith('custom') ? 'galaxy' : v);
+  snd.play(String(v).startsWith('custom') ? 'galaxy' : v, { soft: true });
 }
 function renderMusic() {
   const box = $('bgm-list');
@@ -1436,6 +1436,51 @@ function el(cls, html) {
 }
 
 // the song's display name: file name without extension, or the title found from its link
+// a Spotify song plays inside Spotify's own player (an iframe of another site): the browser lets no page
+// change that sound, and Spotify gives no volume command — so no «under water» and no fades for it
+const SPOTIFY_NOTE = 'Spotify не даёт сайту менять звук: без эффекта «под водой» и плавности. Для эффекта добавь файл или ссылку SoundCloud.',
+  PREVIEW_NOTE = 'Играет отрывок 30 с из Apple Music, со звуком сайта';
+// a Spotify song with Apple Music's preview of it: the preview plays through the site's own sound
+const usesPreview = d => !!(d && d.audio && d.audio.preview && (songEmbed(d) || {}).svc === 'spotify');
+function songNote(pe, d) {
+  const info = pe.querySelector('.pinfo');
+  info.querySelectorAll('.pnote, .plink.sp').forEach(x => x.remove());
+  if ((songEmbed(d) || {}).svc !== 'spotify') return;
+  const n = document.createElement('div');
+  n.className = 'pnote';
+  n.textContent = usesPreview(d) ? PREVIEW_NOTE : SPOTIFY_NOTE;
+  info.appendChild(n);
+  if (usesPreview(d) && safeUrl(d.audio.url)) {
+    const a = document.createElement('a');
+    a.className = 'plink sp';
+    a.href = d.audio.url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = 'вся песня в Spotify ↗';
+    info.appendChild(a);
+  }
+}
+/* Sheets from one text: whole sentences, grouped so that each sheet holds about 90–200 characters,
+   at most SHEET_MAX sheets. The user's words are not changed, only divided. */
+const SHEET_SPLIT_CHARS = 170,
+  SHEET_TARGET = 150,
+  SHEET_MAX = 5;
+function groupSentences(text) {
+  const ss = (String(text).match(/[^.!?…]+[.!?…]+["»)]*\s*|[^.!?…]+$/g) || [text]).map(s => s.trim()).filter(Boolean);
+  if (ss.length < 2) return [text];
+  const n = Math.min(SHEET_MAX, Math.max(2, Math.round(text.length / SHEET_TARGET))),
+    per = text.length / n,
+    out = [];
+  let cur = '';
+  for (const s of ss) {
+    if (cur && (cur + ' ' + s).length > per * 1.15 && out.length < n - 1) {
+      out.push(cur);
+      cur = s;
+    } else cur = cur ? cur + ' ' + s : s;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
 function songNameOf(d) {
   if (!d.audio) return '';
   if (d.audio.blob) return (d.audio.name || 'Песня дня').replace(/\.[a-z0-9]+$/i, '');
@@ -1462,12 +1507,14 @@ function buildItems(d) {
     pinTitle: true,
   });
   const chunk = s => (s.length <= 240 ? [s] : sentences(s));
+  // one long text (written in a single note, and the AI kept it whole) is split into sheets of a few sentences
+  const sheets = list => (list.length === 1 && list[0].length > SHEET_SPLIT_CHARS ? groupSentences(list[0]) : list);
   const photos = (d.photos || []).slice(0, 8),
     frags =
       d.fragments && d.fragments.length
-        ? d.fragments
+        ? sheets(d.fragments)
         : d.notes && d.notes.length
-          ? d.notes.flatMap(chunk)
+          ? sheets(d.notes).flatMap(chunk)
           : sentences(d.text),
     seq = [];
   for (let i = 0; i < Math.max(photos.length, frags.length); i++) {
@@ -1561,6 +1608,8 @@ function buildItems(d) {
     <button class="pbtn" aria-label="Пауза">${ICON.pause}${ICON.play}</button>`;
   pe.querySelector('.ptitle').textContent = name;
   pe.querySelector('.psub').textContent = sub;
+  // a Spotify song: either Apple's preview through the site's sound, or Spotify's own player
+  songNote(pe, d);
   const cv = d.cover || (d.photos && d.photos[d.coverPhoto || 0]) || (d.photos && d.photos[0]);
   if (cv) pe.querySelector('.cover-photo').style.backgroundImage = `url("${cv}")`;
   // a chosen picture (song artwork, own image, ready-made cover) is shown as it is, without the day's tint
@@ -1890,7 +1939,7 @@ const EMBED_QUIET = 0.6,
   SONG_TICK_MS = 50;
 function startSongPart(el, audio) {
   // a song from a link cannot be filtered (it plays in the service's own player): it is only quieter
-  el.baseVol = Math.max(0.3, settings.volume) * (el.svc ? EMBED_QUIET : 1);
+  el.baseVol = Math.max(0.3, settings.volume) * (el.svc ? EMBED_QUIET : 1) * (audio.gain || 1);
   vol(el, 0);
   el.seg = {
     a: audio.start != null ? audio.start : null,
@@ -2042,11 +2091,63 @@ function openDayView(d) {
     songEl = new Audio(URL.createObjectURL(d.audio.blob));
     startSongPart(songEl, d.audio);
     songEl.muted = !settings.sound;
-    snd.attach(songEl, { underwater: true });
+    snd.attach(songEl, fxOf(d.audio));
     playMedia(songEl);
     if (!settings.sound) toast('Звук выключен — нажми на динамик внизу, чтобы услышать песню дня', 4200);
     snd.setDuck(0.2);
-  } else if (songEmbed(d)) {
+  } else if (usesPreview(d)) {
+    playPreview(d);
+  } else if ((songEmbed(d) || {}).svc === 'spotify' && d.audio.preview == null) {
+    // an older Spotify day: look for Apple's preview of it once (while the drop falls), then play
+    findPreview(d).then(() => {
+      if (openDay !== d || songEl) return;
+      if (usesPreview(d)) playPreview(d);
+      else playEmbed(d);
+      if (player) songNote(player.el, d);
+    });
+  } else if (songEmbed(d)) playEmbed(d);
+  if (snd.ctx) {
+    const t = d.mood.tempo;
+    snd.play(d.mood.kind, { bpm: t ? Math.max(44, Math.min(120, t > 125 ? t / 2 : t)) : undefined, underwater: true });
+  }
+}
+// Apple Music's 30 s preview of a Spotify song: an ordinary audio file, so it goes through the site's
+// sound (under water, echo, 3 s fades), from its start and round again
+function playPreview(d) {
+  songEl = new Audio();
+  songEl.crossOrigin = 'anonymous';
+  songEl.src = d.audio.preview;
+  const c = d.audio.cut;
+  startSongPart(songEl, { start: c ? c.a : 0, end: c ? c.b : 0, gain: d.audio.gain });
+  songEl.muted = !settings.sound;
+  snd.attach(songEl, fxOf(d.audio));
+  playMedia(songEl);
+  songEl.addEventListener('error', () => {
+    // the preview went away: Spotify's own player instead
+    if (!songEl || songEl.src !== d.audio.preview || openDay !== d) return;
+    const dead = songEl;
+    songEl = null;
+    dead.pause();
+    clearInterval(dead.fadeTimer);
+    d.audio.preview = '';
+    putDay(d).catch(() => {});
+    if (player) songNote(player.el, d);
+    playEmbed(d);
+  });
+  if (!settings.sound) toast('Звук выключен — нажми на динамик внизу, чтобы услышать песню дня', 4200);
+  snd.setDuck(0.2);
+}
+// the song's effect chosen in the form: under water (the default), soft, or none
+const fxOf = a => ({ underwater: !a || !a.fx || a.fx === 'underwater', soft: !!a && a.fx === 'soft' });
+const PREVIEW_WAIT_MS = 5000;
+async function findPreview(d) {
+  const j = await Promise.race([aiCover(d.audio.url).catch(() => null), new Promise(r => setTimeout(() => r(undefined), PREVIEW_WAIT_MS))]);
+  if (j === undefined) return; // too slow this time: ask again next visit
+  d.audio.preview = (j && j.preview) || '';
+  await putDay(d).catch(() => {});
+}
+function playEmbed(d) {
+  {
     // a song from Spotify / SoundCloud plays in the service's own player, from the chosen or the best moment
     const el = (songEl = new EmbedSong($('embedbox'), songEmbed(d), {
       start: d.audio.start != null ? d.audio.start : null,
@@ -2066,10 +2167,6 @@ function openDayView(d) {
       if (songEl === el && el.paused && !el.failed && !paused && settings.sound && openDay === d)
         $('embedbox').classList.add('show');
     }, 6000);
-  }
-  if (snd.ctx) {
-    const t = d.mood.tempo;
-    snd.play(d.mood.kind, { bpm: t ? Math.max(44, Math.min(120, t > 125 ? t / 2 : t)) : undefined, underwater: true });
   }
 }
 function backToArchive() {
@@ -2255,7 +2352,7 @@ $('s-aivoice').onchange = () => {
   saveSettings(settings);
 };
 renderAiStatus();
-document.querySelectorAll('.seg button').forEach(b => (b.onclick = () => setTheme(b.dataset.v)));
+document.querySelectorAll('#s-ui button').forEach(b => (b.onclick = () => setTheme(b.dataset.v)));
 // the interface theme (dark / light): panels, buttons and lists change at once, the sky stays as it is
 function setTheme(v) {
   if (v === settings.ui) return;
@@ -2710,11 +2807,62 @@ $('cv-file').onchange = async () => {
     toast('Не получилось открыть картинку');
   }
 };
+/* A day was created before its song link's cover and name arrived: fill them in when they come
+   (the cover only if the day was meant to use the song's artwork), keep the link in the library up to date,
+   and refresh the open player. */
+function completeLinkLater(id, { pending, linkCover }) {
+  pending.then(async j => {
+    if (!j) return;
+    const day = days.find(x => x.id === id);
+    if (!day || !day.audio || !day.audio.url) return;
+    let changed = false;
+    if (!day.audio.name && j.title) (day.audio.name = j.title), (changed = true);
+    const e = embedOf(day.audio.url, j.embed);
+    if (e && !day.audio.embed) (day.audio.embed = e.uri), (changed = true);
+    if (e && e.svc === 'spotify' && day.audio.preview == null) (day.audio.preview = j.preview || ''), (changed = true);
+    if (linkCover && j.cover) (day.cover = j.cover), (day.coverOwn = true), (changed = true);
+    if (!changed) return;
+    await putDay(day);
+    const item = lib.links.find(x => x.url === day.audio.url);
+    if (item) {
+      if (j.title) item.name = j.title;
+      if (j.cover) item.cover = j.cover;
+      if (e) item.embed = e.uri;
+      if (j.preview) item.preview = j.preview;
+      saveLib('links');
+    }
+    if (openDay && openDay.id === id && player) {
+      player.el.querySelector('.ptitle').textContent = songNameOf(day);
+      if (linkCover && j.cover) {
+        player.el.querySelector('.cover-photo').style.backgroundImage = `url("${j.cover}")`;
+        player.el.querySelector('.album-art').classList.add('own');
+      }
+    }
+  });
+}
+// the form's song settings for a link: none while a file is chosen (the file wins)
+function linkSongSet(u, j) {
+  if ($('f-audio').files[0] || chosenSong) return;
+  const e = embedOf(u, j && j.embed);
+  setupCut(e && e.svc === 'spotify' && j && j.preview ? j.preview : e && e.svc === 'soundcloud' ? 'volume' : null);
+}
+// what the form sets for the day's song: its volume and effect (only when changed)
+function songSettings(audio) {
+  if (cut.vol < 1) audio.gain = cut.vol;
+  if (cut.fx !== 'underwater') audio.fx = cut.fx;
+}
 // what the form says about a pasted link: will it play here, did its cover come
-function linkStatus(u, j) {
+function linkStatus(u, j, loading = false) {
   const e = embedOf(u, j && j.embed),
     parts = [];
-  if (e) parts.push(`♪ Будет играть из ${SERVICE_NAME[e.svc]}, с лучшего момента — перемотать можно в дне`);
+  if (loading) {
+    // nothing to wait for: the day can be created right away, the cover and name arrive in the background
+    $('f-linkst').textContent = (e ? `♪ Будет играть из ${SERVICE_NAME[e.svc]}` : '♪ Песня по ссылке') + ' · обложка подтянется сама';
+    return;
+  }
+  if (e && e.svc === 'spotify' && j && j.preview) parts.push('♪ Будет играть отрывок 30 с из Apple Music, со звуком сайта: момент, громкость и эффект — ниже');
+  else if (e) parts.push(`♪ Будет играть из ${SERVICE_NAME[e.svc]}, с лучшего момента — перемотать можно в дне`);
+  if (e && e.svc === 'spotify' && !(j && j.preview)) parts.push(SPOTIFY_NOTE);
   parts.push(j ? `✓ Обложка${j.title ? ': ' + j.title : ''}` : 'Обложка не нашлась — выбери другую ниже');
   $('f-linkst').textContent = parts.join(' · ');
 }
@@ -2729,15 +2877,21 @@ $('f-link').addEventListener('input', () => {
       st.textContent =
         u && !safeUrl(u) ? '' : u ? 'Обложку можно взять только из Spotify, SoundCloud и Apple Music' : '';
       if (!u) cover.link = null;
+      if (!$('f-audio').files[0] && !chosenSong) setupCut(null);
       return renderCover();
     }
     if (cover.linkFor === u) return;
     cover.linkFor = u;
-    st.textContent = 'Ищу обложку…';
-    const j = await aiCover(u);
+    cover.link = null;
+    linkStatus(u, null, true);
+    if (!$('f-audio').files[0] && !chosenSong) setupCut(null);
+    const pending = (cover.pending = aiCover(u));
+    cover.pendingFor = u;
+    const j = await pending;
     if ($('f-link').value.trim() !== u) return;
     cover.link = j;
     linkStatus(u, j);
+    linkSongSet(u, j);
     if (j && (!cover.pick || cover.pick.type === 'link')) {
       // the song's own artwork wins over the automatic choice, but never over a cover picked by hand
       cover.pick = { type: 'link' };
@@ -2875,13 +3029,23 @@ function renderRecentSongs() {
         cover.linkFor = '';
         $('f-linkst').textContent = '';
       } else {
-        cover.link = s.cover ? { cover: s.cover, title: s.name, embed: s.embed } : null;
+        cover.link = s.cover ? { cover: s.cover, title: s.name, embed: s.embed, preview: s.preview || '' } : null;
         cover.linkFor = s.url;
         if (cover.link && (!cover.pick || cover.pick.type === 'link')) {
           cover.pick = { type: 'link' };
           cover.tab = 'link';
         }
         linkStatus(s.url, cover.link || { embed: s.embed, cover: '', title: s.name });
+        linkSongSet(s.url, cover.link || { embed: s.embed });
+        if (e && e.svc === 'spotify' && !s.preview)
+          aiCover(s.url).then(j => {
+            if (!j || !j.preview || $('f-link').value.trim() !== s.url) return;
+            s.preview = j.preview;
+            saveLib('links');
+            if (cover.link) cover.link.preview = j.preview;
+            linkStatus(s.url, cover.link || j);
+            linkSongSet(s.url, cover.link || j);
+          });
       }
       renderCover();
       renderRecentSongs();
@@ -2904,51 +3068,120 @@ $('f-audio').onchange = () => {
   setupCut(f || null);
 };
 /* Song segment ("тайминг"): which part of the song plays in the day, on a loop. */
-const CUT_MIN_SEC = 5; // the shortest segment
-let cut = { el: null, url: '', dur: 0 };
+const CUT_MIN_SEC = 10; // the shortest part; the longest is the whole song
+let cut = { el: null, url: '', dur: 0, own: false, preview: false, touched: false, fx: 'underwater', vol: 1 };
 const mmss = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 function stopCutPreview() {
   if (cut.el) cut.el.pause();
   $('cut-play').classList.remove('on');
 }
-function setupCut(file) {
+/* SongSettings in the form: the part (at least CUT_MIN_SEC, at most the whole song), the volume and the
+   effect, heard right here before the day is created. src is an audio file, Apple's preview address of a
+   Spotify song, or 'volume' for a SoundCloud link (its player only lets the site set the volume). */
+function setupCut(src) {
   stopCutPreview();
-  if (cut.url) URL.revokeObjectURL(cut.url);
-  cut = { el: null, url: '', dur: 0 };
+  if (cut.own) URL.revokeObjectURL(cut.url);
+  const keep = { fx: cut.fx, vol: cut.vol };
+  cut = { el: null, url: '', dur: 0, own: false, preview: false, touched: false, ...keep };
   $('f-cut').classList.add('hidden');
-  if (!file) return;
-  cut.url = URL.createObjectURL(file);
-  const a = new Audio(cut.url);
+  renderSongSet();
+  if (!src) return;
+  const timeline = src !== 'volume';
+  for (const id of ['cut-range', 'cut-play', 'cut-fx']) $(id).classList.toggle('hidden', !timeline);
+  document.querySelector('#f-cut .cut-times').classList.toggle('hidden', !timeline);
+  if (!timeline) {
+    $('cut-txt').textContent = 'SoundCloud даёт сайту менять только громкость; момент можно перемотать в дне';
+    $('f-cut').classList.remove('hidden');
+    return;
+  }
+  cut.preview = typeof src === 'string';
+  cut.own = !cut.preview;
+  cut.url = cut.preview ? src : URL.createObjectURL(src);
+  const a = cutAudio();
   a.preload = 'metadata';
   a.onloadedmetadata = () => {
-    if (!isFinite(a.duration) || a.duration < CUT_MIN_SEC * 2) return; // short sounds just loop whole
-    cut.el = a;
+    if (cut.el !== a || !isFinite(a.duration)) return;
     cut.dur = Math.floor(a.duration);
     for (const id of ['cut-a', 'cut-b']) $(id).max = cut.dur;
     $('cut-a').value = 0;
     $('cut-b').value = cut.dur;
+    // a sound too short to cut just loops whole: only its volume and effect
+    const short = cut.dur < CUT_MIN_SEC + 2;
+    $('cut-range').classList.toggle('hidden', short);
+    document.querySelector('#f-cut .cut-times').classList.toggle('hidden', short);
     renderCut();
     $('f-cut').classList.remove('hidden');
   };
-  a.ontimeupdate = () => {
-    if (a.currentTime >= +$('cut-b').value) stopCutPreview();
-  };
 }
+// the form's listening copy of the song, through the chosen effect (a new element for each effect:
+// an element is bound to its effect once it plays through the site's sound)
+function cutAudio() {
+  const a = new Audio();
+  if (cut.preview) a.crossOrigin = 'anonymous';
+  a.src = cut.url;
+  if (snd.ctx) snd.attach(a, fxOf({ fx: cut.fx }));
+  a.ontimeupdate = () => {
+    if (cut.el === a && a.currentTime >= +$('cut-b').value) stopCutPreview();
+  };
+  cut.el = a;
+  cutLevel();
+  return a;
+}
+function cutLevel() {
+  if (cut.el) vol(cut.el, Math.max(0.3, settings.volume) * cut.vol);
+}
+function renderSongSet() {
+  $('cut-vol').value = cut.vol;
+  setRangeFill($('cut-vol'));
+  const i = ['underwater', 'soft', 'none'].indexOf(cut.fx);
+  $('cut-fx').style.setProperty('--k', String(Math.max(0, i)));
+  $('cut-fx').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.fx === cut.fx));
+}
+$('cut-vol').oninput = () => {
+  cut.vol = +$('cut-vol').value;
+  setRangeFill($('cut-vol'));
+  cutLevel();
+};
+$('cut-fx').querySelectorAll('button').forEach(
+  b =>
+    (b.onclick = () => {
+      if (cut.fx === b.dataset.fx) return;
+      cut.fx = b.dataset.fx;
+      renderSongSet();
+      if (!cut.el) return;
+      // swap the listening copy for one with the new effect, at the same moment
+      const old = cut.el,
+        t = old.currentTime,
+        on = !old.paused;
+      old.pause();
+      const a = cutAudio();
+      a.currentTime = t;
+      if (on) a.play().catch(() => {});
+    }),
+);
 function renderCut(moved) {
   let a = +$('cut-a').value,
     b = +$('cut-b').value;
   if (b - a < CUT_MIN_SEC) {
-    if (moved === 'b') a = Math.max(0, b - CUT_MIN_SEC);
-    else b = Math.min(cut.dur, a + CUT_MIN_SEC);
+    // the moved knob pushes the other one; at the song's edge it stops itself, so the part never gets shorter
+    if (moved === 'b') {
+      b = Math.min(cut.dur, Math.max(b, CUT_MIN_SEC));
+      a = Math.max(0, b - CUT_MIN_SEC);
+    } else {
+      a = Math.max(0, Math.min(a, cut.dur - CUT_MIN_SEC));
+      b = Math.min(cut.dur, a + CUT_MIN_SEC);
+    }
     $('cut-a').value = a;
     $('cut-b').value = b;
   }
-  $('cut-txt').textContent =
-    a === 0 && b === cut.dur
-      ? `Сыграет около минуты с самого яркого места — или выбери своё`
-      : b === cut.dur
-        ? `Играет около минуты с ${mmss(a)}`
-        : `Играет с ${mmss(a)} до ${mmss(b)}`;
+  const whole = cut.preview ? 'весь отрывок Apple Music' : 'вся песня';
+  $('cut-txt').textContent = !cut.touched
+    ? cut.preview
+      ? `Играет ${whole} (${mmss(cut.dur)}) — или выбери свой момент`
+      : `Сыграет около минуты с самого яркого места — или выбери своё`
+    : a === 0 && b === cut.dur
+      ? `Играет ${whole}`
+      : `Играет с ${mmss(a)} до ${mmss(b)} (${mmss(b - a)})`;
   placeCut(a, b);
 }
 /* SongCut range: one track with two round knobs (start and end) over the whole song, made for a finger and
@@ -2973,6 +3206,7 @@ function placeCut(a, b) {
   }
 }
 function setCut(which, v) {
+  cut.touched = true;
   const inp = $(which === 'a' ? 'cut-a' : 'cut-b');
   inp.value = Math.round(Math.max(0, Math.min(cut.dur, v)));
   inp.dispatchEvent(new Event('input'));
@@ -3023,7 +3257,7 @@ $('cut-play').onclick = () => {
   if (!cut.el) return;
   if (!cut.el.paused) return stopCutPreview();
   cut.el.currentTime = +$('cut-a').value;
-  cut.el.volume = Math.max(0.3, settings.volume);
+  cutLevel();
   cut.el.play().catch(() => {});
   $('cut-play').classList.add('on');
 };
@@ -3045,6 +3279,8 @@ function resetForm() {
   $('f-linkst').textContent = '';
   chosenSong = null;
   renderRecentSongs();
+  cut.fx = 'underwater';
+  cut.vol = 1;
   setupCut(null);
   stopDictation();
   cover = { pick: null, tab: 'photo', link: null, own: null, colors: PREVIEW_COLORS, linkFor: '' };
@@ -3151,6 +3387,7 @@ $('form').onsubmit = async e => {
         brightness: ps.reduce((a, p) => a + p.brightness, 0) / ps.length,
       };
     }
+    let late = null; // a song link whose cover and name are still on their way
     const picked = $('f-audio').files[0],
       af = picked || (chosenSong && chosenSong.blob);
     let audio = null,
@@ -3168,19 +3405,25 @@ $('form').onsubmit = async e => {
           { id: libId(), name: af.name.replace(/\.[a-z0-9]+$/i, ''), blob: af },
           x => x.name === af.name.replace(/\.[a-z0-9]+$/i, '') && x.blob.size === af.size,
         );
-      if (cut.el) {
-        const s = +$('cut-a').value,
-          e = +$('cut-b').value;
-        if (s > 0) audio.start = s;
-        if (e < cut.dur) audio.end = e;
+      if (cut.el && cut.touched) {
+        // the chosen part plays as it is, up to the whole song
+        audio.start = +$('cut-a').value;
+        audio.end = +$('cut-b').value;
       }
+      songSettings(audio);
     } else if (linkRaw) {
       const url = safeUrl(linkRaw),
         lk = cover.linkFor === linkRaw ? cover.link : null,
         e = embedOf(url, lk && lk.embed);
+      if (!lk && cover.pendingFor === linkRaw && cover.pending)
+        late = { pending: cover.pending, linkCover: cover.pick ? cover.pick.type === 'link' : !photos.length };
       audio = { url };
       if (e) audio.embed = e.uri;
       if (lk && lk.title) audio.name = lk.title;
+      if (lk && e && e.svc === 'spotify') audio.preview = lk.preview || '';
+      // the part chosen in Apple's preview (its own seconds, not the Spotify song's)
+      if (cut.preview && cut.touched && audio.preview === cut.url) audio.cut = { a: +$('cut-a').value, b: +$('cut-b').value };
+      songSettings(audio);
       await libAdd(
         'links',
         {
@@ -3189,6 +3432,7 @@ $('form').onsubmit = async e => {
           name: (lk && lk.title) || url.replace(/^https:\/\/(www\.)?/, '').slice(0, 40),
           cover: (lk && lk.cover) || '',
           embed: e ? e.uri : '',
+          preview: (lk && lk.preview) || '',
         },
         x => x.url === url,
       );
@@ -3240,6 +3484,7 @@ $('form').onsubmit = async e => {
     if (d.audio && d.audio.url && cover.link && cover.link.title && !d.audio.name) d.audio.name = cover.link.title;
     await putDay(d);
     await reload(d.id);
+    if (late) completeLinkLater(d.id, late);
     $('busy').classList.add('hidden');
     resetForm();
     const idx = engine.days.findIndex(x => x.id === d.id);

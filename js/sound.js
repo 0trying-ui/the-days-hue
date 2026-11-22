@@ -148,6 +148,16 @@ export const MUSIC_FADE_SEC = 3;
 const UNDERWATER_HZ = 750,
   UNDERWATER_SWAY_HZ = 160,
   UNDERWATER_LEVEL = 0.8;
+// the day's song: a little quieter than the rest, with a small echo of its own
+const SONG_QUIET = 0.85,
+  SONG_ECHO_SEC = 0.32,
+  SONG_ECHO_FEEDBACK = 0.3,
+  SONG_ECHO_LEVEL = 0.28;
+// the archive's background music: a little quieter and calmer, not under water — one gentle low-pass
+// (12 dB/oct around 1800 Hz) that sways slowly, and 70 % of the level
+const SOFT_HZ = 1800,
+  SOFT_SWAY_HZ = 220,
+  SOFT_LEVEL = 0.7;
 
 export class Ambient {
   constructor() {
@@ -245,7 +255,7 @@ export class Ambient {
        Both pass the same way out: under water (in a day) through two low-pass filters whose cut-off sways,
        then through a fade that rises from silence over MUSIC_FADE_SEC and dies away the same way. */
     const now = ctx.currentTime,
-      level = p.underwater ? UNDERWATER_LEVEL : 1;
+      level = p.underwater ? UNDERWATER_LEVEL : p.soft ? SOFT_LEVEL : 1;
     v.bus = ctx.createGain();
     v.fx = ctx.createGain();
     v.out = ctx.createGain();
@@ -257,26 +267,27 @@ export class Ambient {
       g.gain.setValueAtTime(0, now);
       g.gain.linearRampToValueAtTime(to, now + MUSIC_FADE_SEC);
     }
+    // under water: two filters at 750 Hz; soft (the archive): one filter at 1800 Hz; otherwise straight through
     const water = (from, to) => {
-      if (!p.underwater) return from.connect(to);
-      const f1 = ctx.createBiquadFilter(),
-        f2 = ctx.createBiquadFilter();
-      for (const f of [f1, f2]) {
+      if (!p.underwater && !p.soft) return from.connect(to);
+      const fs = [ctx.createBiquadFilter()];
+      if (p.underwater) fs.push(ctx.createBiquadFilter());
+      for (const f of fs) {
         f.type = 'lowpass';
-        f.frequency.value = UNDERWATER_HZ;
+        f.frequency.value = p.underwater ? UNDERWATER_HZ : SOFT_HZ;
         f.Q.value = 0.6;
         sway.connect(f.frequency);
       }
-      from.connect(f1);
-      f1.connect(f2);
-      f2.connect(to);
+      from.connect(fs[0]);
+      if (fs[1]) fs[0].connect(fs[1]);
+      fs[fs.length - 1].connect(to);
     };
     let sway = null;
-    if (p.underwater) {
+    if (p.underwater || p.soft) {
       const so = ctx.createOscillator();
       sway = ctx.createGain();
       so.frequency.value = 0.13;
-      sway.gain.value = UNDERWATER_SWAY_HZ;
+      sway.gain.value = p.underwater ? UNDERWATER_SWAY_HZ : SOFT_SWAY_HZ;
       so.connect(sway);
       so.start();
       v.nodes.push(so);
@@ -569,7 +580,7 @@ export class Ambient {
      Underwater: the day's own song sounds as if heard from under water — two low-pass filters cut the
      sharp highs (24 dB/oct around 750 Hz), the cut-off sways slowly like a moving surface, the level is a
      little lower and a soft echo from the shared delay adds depth. */
-  attach(el, { underwater = false } = {}) {
+  attach(el, { underwater = false, soft = false } = {}) {
     if (!this.ctx) return;
     try {
       const s = this.ctx.createMediaElementSource(el),
@@ -577,6 +588,20 @@ export class Ambient {
       gain.gain.value = 0;
       gain.connect(this.an);
       el.fade = gain; // the caller sets el.fade.gain for its fades (element.volume does nothing on iPhone)
+      if (soft && !underwater) {
+        // an own background track in the archive: a little quieter and calmer (see SOFT_*)
+        const ctx = this.ctx,
+          f = ctx.createBiquadFilter(),
+          lvl = ctx.createGain();
+        f.type = 'lowpass';
+        f.frequency.value = SOFT_HZ;
+        f.Q.value = 0.6;
+        lvl.gain.value = SOFT_LEVEL;
+        s.connect(f);
+        f.connect(lvl);
+        lvl.connect(gain);
+        return;
+      }
       if (!underwater) return s.connect(gain);
       const ctx = this.ctx,
         f1 = ctx.createBiquadFilter(),
@@ -596,13 +621,26 @@ export class Ambient {
       sway.connect(f1.frequency);
       sway.connect(f2.frequency);
       lfo.start();
-      lvl.gain.value = UNDERWATER_LEVEL;
+      lvl.gain.value = UNDERWATER_LEVEL * SONG_QUIET;
       echo.gain.value = 0.18;
       s.connect(f1);
       f1.connect(f2);
       f2.connect(lvl);
       lvl.connect(gain);
       gain.connect(echo);
+      // the song's own small echo (a short delay that repeats a few times, quieter each time); it sits
+      // before the fade, so it rises and dies away with the song
+      const dl = ctx.createDelay(1),
+        fb = ctx.createGain(),
+        wet = ctx.createGain();
+      dl.delayTime.value = SONG_ECHO_SEC;
+      fb.gain.value = SONG_ECHO_FEEDBACK;
+      wet.gain.value = SONG_ECHO_LEVEL;
+      lvl.connect(dl);
+      dl.connect(fb);
+      fb.connect(dl);
+      dl.connect(wet);
+      wet.connect(gain);
       echo.connect(this.delay);
     } catch (e) {
       console.warn(e);
