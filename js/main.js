@@ -1463,6 +1463,8 @@ function songNote(pe, d) {
 /* Sheets from one text: whole sentences, grouped so that each sheet holds about 90–200 characters,
    at most SHEET_MAX sheets. The user's words are not changed, only divided. */
 const SHEET_SPLIT_CHARS = 170,
+  // a day made without AI (no fragments from it) splits sooner, so its notes still become a few sheets
+  SHEET_SPLIT_LOCAL = 90,
   SHEET_TARGET = 150,
   SHEET_MAX = 5;
 function groupSentences(text) {
@@ -1509,7 +1511,8 @@ function buildItems(d) {
   });
   const chunk = s => (s.length <= 240 ? [s] : sentences(s));
   // one long text (written in a single note, and the AI kept it whole) is split into sheets of a few sentences
-  const sheets = list => (list.length === 1 && list[0].length > SHEET_SPLIT_CHARS ? groupSentences(list[0]) : list);
+  const sheets = list =>
+    list.length === 1 && list[0].length > (d.ai ? SHEET_SPLIT_CHARS : SHEET_SPLIT_LOCAL) ? groupSentences(list[0]) : list;
   const photos = (d.photos || []).slice(0, 8),
     frags =
       d.fragments && d.fragments.length

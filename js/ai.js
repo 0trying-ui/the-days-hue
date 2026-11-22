@@ -1,12 +1,13 @@
 // Client for the Gemini proxy. Every call has a timeout and returns null on any problem,
 // so the site silently falls back to the built-in analysis and system voice.
-import { AI_URL } from './config.js';
+import { AI_URL, DEMO } from './config.js';
 
 const KINDS = ['calm', 'tense', 'bright', 'melancholy'];
 const WEATHER = ['rain', 'snow', 'wind', 'sun', 'fog'];
 const HEX = /^#[0-9a-f]{6}$/i;
 
 export function aiUrl() {
+  if (DEMO) return '';
   let o = '';
   try {
     o = localStorage.getItem('ottenok-ai-url') || '';

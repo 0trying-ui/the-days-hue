@@ -12,6 +12,8 @@ const PAGES = ['index.html', 'privacy.html', 'terms.html', '404.html'];
 const SITE_FILES = ['robots.txt', 'sitemap.xml', 'manifest.webmanifest'];
 const PROXY = 'https://ottenok-dnya-ai.tryfx.workers.dev';
 const ESBUILD = 'npx --yes esbuild@0.24.0';
+// DEMO=1: the jury demo, without AI and read-aloud (see build-demo.mjs)
+const DEMO = process.env.DEMO === '1';
 
 rmSync('dist', { recursive: true, force: true });
 mkdirSync('dist/js', { recursive: true });
@@ -34,7 +36,7 @@ function hashed(path) {
 // photo worker: its own minified file; its hashed name is written into the app bundle
 run(`${ESBUILD} js/photo-worker.js --minify --legal-comments=none --outfile=dist/js/photo-worker.js`);
 const workerPath = hashed('js/photo-worker.js');
-run(`${ESBUILD} js/main.js --bundle --minify --format=esm --legal-comments=none --outfile=dist/js/app.js`);
+run(`${ESBUILD} js/main.js --bundle --minify${DEMO ? ' --define:__DEMO__=true' : ''} --format=esm --legal-comments=none --outfile=dist/js/app.js`);
 writeFileSync(
   'dist/js/app.js',
   readFileSync('dist/js/app.js', 'utf8').replaceAll('/js/photo-worker.js', '/' + workerPath),
@@ -116,7 +118,7 @@ const CSP = [
   'font-src https://fonts.gstatic.com',
   "img-src 'self' data: blob:",
   "media-src 'self' data: blob: https://audio-ssl.itunes.apple.com",
-  `connect-src 'self' ${PROXY} https://itunes.apple.com`,
+  `connect-src 'self' ${DEMO ? '' : PROXY + ' '}https://itunes.apple.com`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

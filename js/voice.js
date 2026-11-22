@@ -1,7 +1,8 @@
+import { DEMO } from './config.js';
 // Reads notes aloud with a voice tuned to the day's mood (browser speech synthesis, no real people's voices).
 // Prefers natural/online neural voices when the browser has them and speaks phrase by phrase with pauses
 // and punctuation-driven intonation, so it sounds less monotonous.
-export const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window;
+export const canSpeak = !DEMO && typeof window !== 'undefined' && 'speechSynthesis' in window;
 let voices = [];
 function load() {
   voices = canSpeak ? speechSynthesis.getVoices() : [];

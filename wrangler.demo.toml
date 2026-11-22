@@ -1,0 +1,9 @@
+# Jury demo: the same site without AI and read-aloud, from dist-demo/ (built by `node build-demo.mjs`).
+# Deploy: node build-demo.mjs && npx.cmd wrangler deploy -c wrangler.demo.toml
+name = "the-days-hue-demo"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./dist-demo"
+not_found_handling = "404-page"
+html_handling = "auto-trailing-slash"
