@@ -250,6 +250,22 @@ async function groqAnalyze(env, facts, photos) {
     clearTimeout(timer);
   }
 }
+/* Whisper invents subtitle credits when it hears no clear speech (it was trained on subtitled videos).
+   CREDIT is never part of a diary; MAYBE could be, so it is dropped only when it is all there is. */
+const CREDIT = /dimatorzok|amara\.org|субтитр\S* (?:создавал|сделал|подготовил|подогнал|добавил|предоставил)\S* \S+[.!]?$|^редактор субтитров|^корректор [а-яё]\./i;
+const MAYBE = /^(?:продолжение следует|спасибо за (?:просмотр|внимание)|подписывайтесь на (?:мой |наш )?канал|субтитры|до новых встреч|музыка|аплодисменты|смех)$/i;
+function cleanSpeech(text, segments) {
+  let t = String(text || '').trim();
+  if (Array.isArray(segments) && segments.length) {
+    // parts the model itself takes for silence
+    const said = segments.filter(s => !(s.no_speech_prob > 0.6 && s.avg_logprob < -0.7));
+    if (said.length < segments.length) t = said.map(s => String(s.text || '').trim()).join(' ').trim();
+  }
+  const parts = (t.match(/[^.!?…]+(?:[.!?…]+(?!\s|$)[^.!?…]+)*[.!?…]*\s*/g) || []).map(s => s.trim()).filter(Boolean);
+  const kept = parts.filter(s => !CREDIT.test(s));
+  if (kept.every(s => MAYBE.test(s.replace(/[.!?…♪\s"«»\[\]()]+$/g, '').replace(/^[♪\s"«»\[\]()]+/g, '')))) return '';
+  return kept.length === parts.length ? t : kept.join(' ');
+}
 async function groqTranscribe(env, buf, type) {
   const fd = new FormData();
   // the file name tells Groq the format (Safari records mp4, others webm or ogg)
@@ -257,7 +273,8 @@ async function groqTranscribe(env, buf, type) {
   fd.append('file', new Blob([buf], { type: type || 'audio/webm' }), 'voice.' + ext);
   fd.append('model', env.GROQ_WHISPER || 'whisper-large-v3-turbo');
   fd.append('language', 'ru');
-  fd.append('response_format', 'json');
+  fd.append('response_format', 'verbose_json'); // with how sure the model is about every part
+  fd.append('temperature', '0');
   const r = await fetch(GROQ + '/audio/transcriptions', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + env.GROQ_API_KEY },
@@ -265,7 +282,7 @@ async function groqTranscribe(env, buf, type) {
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error((data.error && data.error.message) || 'Groq HTTP ' + r.status);
-  return String(data.text || '').trim();
+  return cleanSpeech(data.text, data.segments);
 }
 
 // Last-resort analysis on Cloudflare Workers AI (same account, no extra key). Photos are not sent here.
@@ -593,7 +610,7 @@ export default {
           audio: btoa(bin),
           language: 'ru',
         });
-        const text = String((r && r.text) || '').trim();
+        const text = cleanSpeech(r && r.text, r && r.segments);
         await usage.add('dict');
         return json({ text: text.slice(0, 4000) }, 200, cors);
       } catch (e) {

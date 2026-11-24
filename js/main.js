@@ -2794,45 +2794,152 @@ function addNote(v = '') {
 /* Dictation: record a note by voice, the proxy turns it into text (Whisper on Cloudflare Workers AI).
    The text goes into the first empty note, or a new one. Recording stops by itself after DICT_MAX_SEC. */
 const DICT_MAX_SEC = 120;
+// the voice check works on the raw microphone level (RMS, 0–1) measured every MIC_TICK_MS
+const MIC_TICK_MS = 100,
+  MIC_VOICE = 0.0015, // quieter than this is no voice, only the microphone's own hiss
+  MIC_OVER_FLOOR = 2.2, // a voice stands out above the steady background (hiss, a fan) at least so many times
+  MIC_VOICE_TICKS = 4, // so many loud moments make a recording worth sending
+  MIC_HINT_SEC = 3, // after so long without a voice the button says so
+  MIC_TARGET = 0.07, // a quiet voice is raised to about this level
+  MIC_MAX_GAIN = 8;
 let rec = null;
+// the site's own music must not get into the recording
+function quietForMic(on) {
+  snd.setEnabled(!on && settings.sound && !paused);
+  for (const el of [bgmEl, songEl]) if (el) el.muted = on || !settings.sound;
+  if (on) stopCutPreview();
+}
+/* MicInput: raises a quiet voice before it is recorded and reports its level.
+   Returns null where the browser cannot do it; then the microphone is recorded as it is, unchecked. */
+async function micInput(stream) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  let ctx;
+  try {
+    ctx = new AC();
+    // a suspended context would record silence, and resume() may never settle
+    if (ctx.state !== 'running') await Promise.race([ctx.resume(), new Promise(r => setTimeout(r, 600))]);
+    if (ctx.state !== 'running') throw new Error('audio is suspended');
+    const src = ctx.createMediaStreamSource(stream),
+      an = ctx.createAnalyser(),
+      gain = ctx.createGain(),
+      lim = ctx.createDynamicsCompressor(),
+      out = ctx.createMediaStreamDestination();
+    an.fftSize = 2048;
+    lim.threshold.value = -6;
+    lim.knee.value = 0;
+    lim.ratio.value = 20;
+    src.connect(an);
+    src.connect(gain).connect(lim).connect(out);
+    const buf = new Float32Array(an.fftSize);
+    const levels = [];
+    // the background is the quietest tenth of what was heard so far: there are pauses between words
+    const bar = () => {
+      const q = [...levels].sort((a, b) => a - b)[Math.floor(levels.length / 10)] || 0;
+      return Math.max(MIC_VOICE, q * MIC_OVER_FLOOR);
+    };
+    const tick = () => {
+      an.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (const v of buf) sum += v * v;
+      const rms = Math.sqrt(sum / buf.length);
+      levels.push(rms);
+      const voice = rms >= bar();
+      if (voice) {
+        gain.gain.setTargetAtTime(Math.max(1, Math.min(MIC_MAX_GAIN, MIC_TARGET / rms)), ctx.currentTime, 0.3);
+      }
+      // the bar is logarithmic, like hearing: -60 dB is empty, -12 dB is full
+      const db = 20 * Math.log10(rms + 1e-6);
+      const i = $('f-level').firstElementChild;
+      i.style.width = Math.max(0, Math.min(100, ((db + 60) / 48) * 100)).toFixed(0) + '%';
+      i.style.background = voice ? 'var(--c-ok)' : 'var(--c-warn)';
+    };
+    const timer = setInterval(tick, MIC_TICK_MS);
+    return {
+      stream: out.stream,
+      heard: () => {
+        const b = bar();
+        return levels.filter(v => v >= b).length;
+      },
+      close: () => {
+        clearInterval(timer);
+        ctx.close().catch(() => {});
+      },
+    };
+  } catch (err) {
+    console.warn('microphone level is not available', err);
+    if (ctx) ctx.close().catch(() => {});
+    return null;
+  }
+}
 function canDictate() {
   return !!(navigator.mediaDevices && window.MediaRecorder && aiReady);
 }
-function micUi(state, sec = 0) {
+function micUi(state, sec = 0, deaf = false) {
   const b = $('f-mic');
+  $('f-level').classList.toggle('hidden', !(state === 'rec' && rec && rec.input));
   b.classList.toggle('rec', state === 'rec');
   b.classList.toggle('busy', state === 'busy');
   b.setAttribute('aria-pressed', String(state === 'rec'));
   $('f-mictxt').textContent =
-    state === 'rec' ? `● ${mmss(sec)} · нажми, чтобы закончить` : state === 'busy' ? 'Расшифровываю…' : 'Надиктовать';
+    state === 'rec' ? `● ${mmss(sec)} · ${deaf ? 'не слышу голос' : 'нажми, чтобы закончить'}` : state === 'busy' ? 'Расшифровываю…' : 'Надиктовать';
 }
+let micOpening = false;
 async function startDictation() {
+  if (micOpening) return;
+  micOpening = true;
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    // the browser's noise suppression can swallow a quiet voice, and its own gain raises silence to the level
+    // of a voice: both are off, micInput() raises only what stands out above the background
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false },
+    });
   } catch {
+    micOpening = false;
     toast('Нет доступа к микрофону — разреши его в браузере');
     return;
   }
   const type =
     ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find(t => MediaRecorder.isTypeSupported(t)) || '';
-  const mr = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 32000 } : undefined);
+  quietForMic(true);
+  const input = await micInput(stream);
+  let mr;
+  try {
+    mr = new MediaRecorder(input ? input.stream : stream, type ? { mimeType: type, audioBitsPerSecond: 32000 } : undefined);
+  } catch {
+    stream.getTracks().forEach(t => t.stop());
+    if (input) input.close();
+    quietForMic(false);
+    micOpening = false;
+    toast('Этот браузер не умеет записывать голос');
+    return;
+  }
+  micOpening = false;
   const parts = [],
     t0 = performance.now();
-  rec = { mr, stream, timer: 0 };
+  rec = { mr, stream, timer: 0, input };
   mr.ondataavailable = e => e.data.size && parts.push(e.data);
   mr.onstop = async () => {
     stream.getTracks().forEach(t => t.stop());
     clearInterval(rec && rec.timer);
     rec = null;
+    if (input) input.close();
+    quietForMic(false);
     const blob = new Blob(parts, { type: mr.mimeType || type || 'audio/webm' });
+    // nothing was said: do not spend a dictation (and do not let the model invent a phrase)
+    if (input && input.heard() < MIC_VOICE_TICKS) {
+      micUi('idle');
+      toast('Не слышу голос — проверь, тот ли микрофон выбран в браузере', 4200);
+      return;
+    }
     if (blob.size < 2000) return micUi('idle');
     micUi('busy');
     const text = await aiTranscribe(blob);
     const hit = afterAiCall();
     micUi('idle');
     if (!text) {
-      if (!hit) toast('Не получилось расшифровать, попробуй ещё раз');
+      if (!hit) toast(text === '' ? 'Не расслышал, скажи ещё раз' : 'Не получилось расшифровать, попробуй ещё раз');
       return;
     }
     const empty = [...$('notes').querySelectorAll('textarea')].find(t => !t.value.trim());
@@ -2846,7 +2953,7 @@ async function startDictation() {
   rec.timer = setInterval(() => {
     const sec = (performance.now() - t0) / 1000;
     if (sec >= DICT_MAX_SEC) stopDictation();
-    else micUi('rec', sec);
+    else micUi('rec', sec, !!input && sec >= MIC_HINT_SEC && input.heard() < MIC_VOICE_TICKS);
   }, 250);
 }
 function stopDictation() {

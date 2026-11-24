@@ -3198,6 +3198,15 @@ textarea:focus,
 .reduce .ghostbtn.mic.rec svg {
   animation: none;
 }
+/* MicLevel: how loud the microphone hears the voice while a note is being dictated */
+.limbar.lvl {
+  flex: 0 0 auto;
+  width: 100%;
+  margin-top: var(--sp-2);
+}
+.limbar.lvl i {
+  transition: width 0.1s linear;
+}
 
 /* Marks on the wave: month names over their knots, and a bubble with the date over the pill while dragging */
 .rib-marks {

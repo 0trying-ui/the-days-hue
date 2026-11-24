@@ -149,7 +149,8 @@ export async function aiSpeak(text, kind, style) {
   return b && b.size > 1000 ? b : null;
 }
 
-// Speech to text: the recorded audio goes to the proxy (Cloudflare Workers AI, Whisper). Returns text or null.
+// Speech to text: the recorded audio goes to the proxy (Whisper). Returns the text, '' when the
+// proxy heard no clear speech, or null when the call failed.
 export async function aiTranscribe(blob) {
   const r = await call(
     '/transcribe',
