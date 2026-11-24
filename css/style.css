@@ -2915,6 +2915,8 @@ textarea:focus,
   cursor: zoom-in;
 }
 .it.focus {
+  /* a hinted layer keeps the small wall-size picture and only stretches it: looked at closely, it is drawn anew */
+  will-change: auto;
   cursor: zoom-out;
 }
 
@@ -4099,9 +4101,13 @@ input[type='range']:active::-webkit-slider-thumb {
 }
 
 /* CassettePlayer: a pocket tape player with real thickness, tilted toward the viewer */
+/* the space above holds the floating cassette: the card's own size includes it, so neither the wall's layout
+   nor the close look cuts it off */
 .it.deck {
   width: 300px;
+  padding-top: 88px;
   perspective: 900px;
+  perspective-origin: 50% 62%;
 }
 .wm {
   position: relative;
@@ -4121,7 +4127,8 @@ input[type='range']:active::-webkit-slider-thumb {
   transform: translateZ(14px);
   transform-style: preserve-3d;
 }
-/* the player's thickness: a darker slab behind the face */
+/* the player's thickness: a darker slab behind the face (also first in the markup, so that a browser that
+   flattens the 3D still paints the face over it) */
 .wm-side {
   position: absolute;
   inset: 0;
@@ -4186,7 +4193,7 @@ input[type='range']:active::-webkit-slider-thumb {
   box-shadow:
     inset 0 0 0 1px rgba(0, 0, 0, 0.08),
     0 18px 26px -10px rgba(0, 0, 0, 0.55);
-  transform: translate3d(0, -150px, 70px) rotateX(-28deg) rotateZ(-7deg);
+  transform: translate3d(0, -86px, 40px) rotateX(-20deg) rotateZ(-6deg);
   transition: transform var(--dur-slow) var(--spring);
 }
 .it.deck.in .cassette {
@@ -4226,6 +4233,7 @@ input[type='range']:active::-webkit-slider-thumb {
 }
 .reel {
   position: relative;
+  z-index: 1;
   width: 36px;
   height: 36px;
   border-radius: 50%;
@@ -4261,13 +4269,16 @@ input[type='range']:active::-webkit-slider-thumb {
   box-shadow:
     0 5px 0 #8e877a,
     0 7px 8px rgba(0, 0, 0, 0.3);
+  position: relative;
+  top: 0;
   transition:
-    transform 0.08s,
+    top 0.08s,
     box-shadow 0.08s;
 }
 .wm-keys button.down,
 .wm-keys button:active {
-  transform: translateY(4px);
+  /* not a transform: inside the 3D player a key that moves by one slips out from under the pointer, and the click is lost */
+  top: 4px;
   box-shadow:
     0 1px 0 #8e877a,
     0 2px 3px rgba(0, 0, 0, 0.3);
@@ -4294,6 +4305,14 @@ input[type='range']:active::-webkit-slider-thumb {
   white-space: nowrap;
   font: 600 18px var(--hand);
   color: #3a332b;
+}
+/* on a phone the keys and knobs on the wall are too small for a finger: a tap brings the card closer first */
+@media (pointer: coarse) {
+  .it.deck:not(.focus) .wm-keys button,
+  .it.tv:not(.focus) .knob,
+  .it.tv:not(.focus) .tv-pp {
+    pointer-events: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .it.deck.play .reel {

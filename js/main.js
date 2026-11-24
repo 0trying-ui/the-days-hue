@@ -2149,7 +2149,8 @@ function knob(b, get, set, label) {
   return show;
 }
 const ICON_PP = '<svg class="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg><svg class="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg>';
-/* RetroTV: the video plays on a loop, silent at first. Tapping the screen pauses or resumes it; the
+/* RetroTV: the video plays on a loop, silent at first. Looked at closely, a tap on the screen pauses or
+   resumes it (on the wall the tap brings the TV closer, like any card); the
    upper knob scrubs through the video, the lower knob is its volume (turned to zero it is silent). */
 function tvItem(v, d) {
   const e = el(
@@ -2174,7 +2175,11 @@ function tvItem(v, d) {
     else vd.pause();
   };
   pp.onclick = toggle;
-  e.querySelector('.tv-scr').onclick = toggle;
+  const scr = e.querySelector('.tv-scr');
+  let near = false;
+  scr.addEventListener('pointerdown', () => (near = e.classList.contains('focus')));
+  scr.addEventListener('pointerup', ev => near && ev.stopPropagation()); // a tap on the screen does not put the TV back
+  scr.onclick = ev => near && toggle(ev);
   vd.addEventListener('play', state);
   vd.addEventListener('pause', state);
   const showTime = knob(
@@ -2212,7 +2217,7 @@ function tapeItem(v, d) {
   const name = (v.name || 'Звук дня').replace(/\.[a-z0-9]+$/i, '').slice(0, 28);
   const e = el(
     'deck',
-    `<div class="wm"><div class="wm-body"><div class="wm-top"><span class="wm-brand">звук дня</span><span class="wm-led"></span></div><div class="wm-win"><div class="cassette"><div class="c-label"></div><div class="c-win"><i class="reel"></i><i class="c-tape"></i><i class="reel"></i></div></div><i class="wm-glass"></i></div><div class="wm-keys"><button type="button" data-k="play" aria-label="Играть"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></button><button type="button" data-k="pause" aria-label="Пауза"><svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg></button><button type="button" data-k="eject" aria-label="Достать кассету"><svg viewBox="0 0 24 24"><path d="M5 14l7-8 7 8zM5 18.5h14"/></svg></button></div><div class="wm-foot"><span class="wm-count">000</span><span class="wm-name"></span></div></div><i class="wm-side"></i></div>`,
+    `<div class="wm"><i class="wm-side"></i><div class="wm-body"><div class="wm-top"><span class="wm-brand">звук дня</span><span class="wm-led"></span></div><div class="wm-win"><div class="cassette"><div class="c-label"></div><div class="c-win"><i class="reel"></i><i class="c-tape"></i><i class="reel"></i></div></div><i class="wm-glass"></i></div><div class="wm-keys"><button type="button" data-k="play" aria-label="Играть"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></button><button type="button" data-k="pause" aria-label="Пауза"><svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg></button><button type="button" data-k="eject" aria-label="Достать кассету"><svg viewBox="0 0 24 24"><path d="M5 14l7-8 7 8zM5 18.5h14"/></svg></button></div><div class="wm-foot"><span class="wm-count">000</span><span class="wm-name"></span></div></div></div>`,
   );
   e.querySelector('.c-label').textContent = name;
   e.querySelector('.wm-name').textContent = name;

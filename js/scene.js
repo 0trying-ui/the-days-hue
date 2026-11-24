@@ -1167,7 +1167,7 @@ export class Engine {
     // mini player over the dock: on a phone it takes almost the full width so the name and buttons stay readable
     const ms = player ? clamp((W - (W < 700 ? 24 : 40)) / (player.w || 440), 0.5, 1) * (W < 700 ? 0.98 : 0.78) : 0;
     const top = -H * 0.45 + (W < 700 ? 170 : 112),
-      mini = player ? (player.h || 150) * ms + 16 : 0;
+      mini = player ? (player.h || 150) * ms + (W < 700 ? 40 : 16) : 0; // half of the extra is the gap above it
     const bottom = H * 0.55 - 100 - mini,
       left = -W / 2 + 22,
       aw = W - 44,
